@@ -1,4 +1,4 @@
-name: Build OnePlus-Sm8150-Kernel
+name: Build OnePlus-Sm8150-Kernel-LOS20
 on:
   workflow_dispatch:
   schedule:
@@ -62,5 +62,5 @@ jobs:
     - name: Upload Kernel-SU
       uses: actions/upload-artifact@v3
       with:
-        name: OP7-kernel-SU-${{ steps.get_time.outputs.TIME }}
+        name: OP7-LOS20-kernel-SU-${{ steps.get_time.outputs.TIME }}
         path: "AnyKernel3/*"
