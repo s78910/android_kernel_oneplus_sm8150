@@ -1,4 +1,4 @@
-name: Build OnePlus-Sm8150-Kernel
+name: Build OnePlus-Sm8150-Kernel-OOS12
 on:
   workflow_dispatch:
   schedule:
