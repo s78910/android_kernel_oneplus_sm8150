@@ -6,10 +6,10 @@ on:
       - cron: '0 21 * * *'
   push:
     branches:
-      - HEAD
+      - oneplus/LOS_SM8150_13.0
   pull_request:
       branches:
-      - HEAD
+      - oneplus/LOS_SM8150_13.0
 
 jobs:
   build:
