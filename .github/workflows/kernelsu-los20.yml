@@ -30,8 +30,9 @@ jobs:
 
     - name: Fetch all histories
       run: |
-        cd KernelSU && git rev-list --count HEAD
+        cd KernelSU
         git fetch --unshallow
+        git pull
         git rev-list --count HEAD
         cd ..
 
