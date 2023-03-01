@@ -47,7 +47,7 @@ jobs:
         git fetch --unshallow
         git pull
         git rev-list --count HEAD
-        echo "VERSION=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
+        echo "VERSION=$(expr $(git rev-list --count HEAD) + 1200)" >> $GITHUB_OUTPUT
         cd ..
     - name: Build Kernel
       run: |
