@@ -26,8 +26,7 @@ jobs:
       uses: actions/checkout@v3
       with:
         submodules: 'true'
-        fetch-depth: 100
-
+        fetch-depth: 1
     - name: Set up ccache
       uses: hendrikmuhs/ccache-action@v1.2
 
@@ -39,14 +38,17 @@ jobs:
         sudo apt install binutils make python3 libssl-dev build-essential bc  bison flex unzip libssl-dev ca-certificates xz-utils mkbootimg cpio device-tree-compiler git git-lfs -y
         git clone https://github.com/grm34/proton-clang -b ZenMaxBuilder clang
         git clone https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 aarch64
-        git clone https://github.com/lateautumn233/AnyKernel3 -b master --depth=1
+        git clone https://github.com/snowwolf725/AnyKernel3 -b oneplus7 --depth=1
         rm -rf AnyKernel3/.git
-        ls clang
-    
-    - name: GetTime
-      id: get_time
+    - name: Get Version
+      id: get_version
       run: |
-        echo "TIME=$(TZ=UTC-8 date +%m%d%H%M )" >> $GITHUB_OUTPUT
+        cd KernelSU
+        git fetch --unshallow
+        git pull
+        git rev-list --count HEAD
+        echo "VERSION=$(expr $(git rev-list --count HEAD) + 1200)" >> $GITHUB_OUTPUT
+        cd ..
     - name: Build Kernel
       run: |
        export PATH=$(pwd)/clang/bin/:$(pwd)/aarch64/bin/:$PATH
@@ -61,6 +63,5 @@ jobs:
     - name: Upload Kernel-SU
       uses: actions/upload-artifact@v3
       with:
-        name: OP7-OOS12-kernel-SU-${{ steps.get_time.outputs.TIME }}
+        name: OP7-LOS20-kernel-SU-${{ steps.get_version.outputs.VERSION }}
         path: "AnyKernel3/*"
-
