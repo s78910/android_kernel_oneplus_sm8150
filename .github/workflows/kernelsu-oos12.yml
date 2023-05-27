@@ -6,10 +6,10 @@ on:
       - cron: '0 21 * * *'
   push:
     branches:
-      - oneplus/sm8150_s_12.1_op7pro
+      - oneplus/OOS_SM8150_11.0
   pull_request:
       branches:
-      - oneplus/sm8150_s_12.1_op7pro
+      - oneplus/OOS_SM8150_11.0
 
 jobs:
   build:
