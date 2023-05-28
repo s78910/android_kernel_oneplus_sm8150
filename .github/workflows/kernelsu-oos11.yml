@@ -63,5 +63,5 @@ jobs:
     - name: Upload Kernel-SU
       uses: actions/upload-artifact@v3
       with:
-        name: OP7-OOS12-kernel-SU-${{ steps.get_version.outputs.VERSION }}
+        name: OP7-OOS11-kernel-SU-${{ steps.get_version.outputs.VERSION }}
         path: "AnyKernel3/*"
