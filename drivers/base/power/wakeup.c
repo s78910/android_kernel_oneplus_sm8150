@@ -19,27 +19,27 @@
 #include <linux/interrupt.h>
 #include <linux/wakeup_reason.h>
 #include <trace/events/power.h>
-#ifdef OPLUS_FEATURE_LOGKIT
-#include <linux/rtc.h>
-#include <soc/oplus/system/oplus_sync_time.h>
-#endif /* OPLUS_FEATURE_LOGKIT */
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/irqdesc.h>
 
-#ifdef OPLUS_FEATURE_POWERINFO_STANDBY
-#include "../../drivers/soc/oplus/owakelock/oplus_wakelock_profiler_qcom.h"
-#endif /* OPLUS_FEATURE_POWERINFO_STANDBY */
-
-#ifdef OPLUS_FEATURE_POWERINFO_STANDBY
-#include <linux/proc_fs.h>
-#endif /* OPLUS_FEATURE_POWERINFO_STANDBY */
-
 #include "power.h"
+#include <linux/wakeup_reason.h>
+#include <linux/pm_wakeup.h>
 
 #ifndef CONFIG_SUSPEND
 suspend_state_t pm_suspend_target_state;
 #define pm_suspend_target_state	(PM_SUSPEND_ON)
+#endif
+
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+#include "boeffla_wl_blocker.h"
+
+char list_wl_search[LENGTH_LIST_WL_SEARCH] = {0};
+bool wl_blocker_active = false;
+bool wl_blocker_debug = false;
+
+static void wakeup_source_deactivate(struct wakeup_source *ws);
 #endif
 
 /*
@@ -91,6 +91,9 @@ static struct wakeup_source deleted_ws = {
 };
 
 static DEFINE_IDA(wakeup_ida);
+#define WORK_TIMEOUT	(60*1000)
+static void ws_printk(struct work_struct *work);
+static DECLARE_DELAYED_WORK(ws_printk_work, ws_printk);
 
 /**
  * wakeup_source_prepare - Prepare a new wakeup source for initialization.
@@ -597,10 +600,6 @@ static void wakeup_source_activate(struct wakeup_source *ws)
 			"unregistered wakeup source\n"))
 		return;
 
-		#ifdef OPLUS_FEATURE_POWERINFO_STANDBY
-		//wakeup_get_start_hold_time();
-		wakeup_get_start_time();
-		#endif /* OPLUS_FEATURE_POWERINFO_STANDBY */
 	ws->active = true;
 	ws->active_count++;
 	ws->last_time = ktime_get();
@@ -613,6 +612,57 @@ static void wakeup_source_activate(struct wakeup_source *ws)
 	trace_wakeup_source_activate(ws->name, cec);
 }
 
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+// AP: Function to check if a wakelock is on the wakelock blocker list
+static bool check_for_block(struct wakeup_source *ws)
+{
+	char wakelock_name[52] = {0};
+	int length;
+
+	// if debug mode on, print every wakelock requested
+	if (wl_blocker_debug)
+		printk("Boeffla WL blocker: %s requested\n", ws->name);
+
+	// if there is no list of wakelocks to be blocked, exit without futher checking
+	if (!wl_blocker_active)
+		return false;
+
+	// only if ws structure is valid
+	if (ws)
+	{
+		// wake lock names handled have maximum length=50 and minimum=1
+		length = strlen(ws->name);
+		if ((length > 50) || (length < 1))
+			return false;
+
+		// check if wakelock is in wake lock list to be blocked
+		sprintf(wakelock_name, ";%s;", ws->name);
+
+		if(strstr(list_wl_search, wakelock_name) == NULL)
+			return false;
+
+		// wake lock is in list, print it if debug mode on
+		if (wl_blocker_debug)
+			printk("Boeffla WL blocker: %s blocked\n", ws->name);
+
+		// if it is currently active, deactivate it immediately + log in debug mode
+		if (ws->active)
+		{
+			wakeup_source_deactivate(ws);
+
+			if (wl_blocker_debug)
+				printk("Boeffla WL blocker: %s killed\n", ws->name);
+		}
+
+		// finally block it
+		return true;
+	}
+
+	// there was no valid ws structure, do not block by default
+	return false;
+}
+#endif
+
 /**
  * wakeup_source_report_event - Report wakeup event using the given source.
  * @ws: Wakeup source to report the event for.
@@ -620,6 +670,10 @@ static void wakeup_source_activate(struct wakeup_source *ws)
  */
 static void wakeup_source_report_event(struct wakeup_source *ws, bool hard)
 {
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+	if (!check_for_block(ws))	// AP: check if wakelock is on wakelock blocker list
+	{
+#endif
 	ws->event_count++;
 	/* This is racy, but the counter is approximate anyway. */
 	if (events_check_enabled)
@@ -627,6 +681,10 @@ static void wakeup_source_report_event(struct wakeup_source *ws, bool hard)
 
 	if (!ws->active)
 		wakeup_source_activate(ws);
+
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+	}
+#endif
 
 	if (hard)
 		pm_system_wakeup();
@@ -654,6 +712,7 @@ void __pm_stay_awake(struct wakeup_source *ws)
 	spin_unlock_irqrestore(&ws->lock, flags);
 }
 EXPORT_SYMBOL_GPL(__pm_stay_awake);
+
 
 /**
  * pm_stay_awake - Notify the PM core that a wakeup event is being processed.
@@ -742,12 +801,8 @@ static void wakeup_source_deactivate(struct wakeup_source *ws)
 	trace_wakeup_source_deactivate(ws->name, cec);
 
 	split_counters(&cnt, &inpr);
-	if (!inpr && waitqueue_active(&wakeup_count_wait_queue)){
-		#ifdef OPLUS_FEATURE_POWERINFO_STANDBY
-		wakeup_get_end_hold_time();
-		#endif /* OPLUS_FEATURE_POWERINFO_STANDBY */
+	if (!inpr && waitqueue_active(&wakeup_count_wait_queue))
 		wake_up(&wakeup_count_wait_queue);
-	}
 }
 
 /**
@@ -894,13 +949,8 @@ void pm_get_active_wakeup_sources(char *pending_wakeup_source, size_t max)
 			if (!active)
 				len += scnprintf(pending_wakeup_source, max,
 						"Pending Wakeup Sources: ");
-#ifndef OPLUS_FEATURE_POWERINFO_STANDBY_DEBUG
 			len += scnprintf(pending_wakeup_source + len, max - len,
 				"%s ", ws->name);
-#else
-			len += scnprintf(pending_wakeup_source + len, max - len,
-				"%s, %ld, %ld ", ws->name, ws->active_count, ktime_to_ms(ws->total_time));
-#endif
 			active = true;
 		} else if (!active &&
 			   (!last_active_ws ||
@@ -910,20 +960,11 @@ void pm_get_active_wakeup_sources(char *pending_wakeup_source, size_t max)
 		}
 	}
 	if (!active && last_active_ws) {
-#ifndef OPLUS_FEATURE_POWERINFO_STANDBY_DEBUG
 		scnprintf(pending_wakeup_source, max,
 				"Last active Wakeup Source: %s",
 				last_active_ws->name);
-#else
-		scnprintf(pending_wakeup_source, max,
-				"Last active Wakeup Source: %s, %ld, %ld",
-				last_active_ws->name, last_active_ws->active_count, ktime_to_ms(last_active_ws->total_time));
-#endif
 	}
 	srcu_read_unlock(&wakeup_srcu, srcuidx);
-#ifdef OPLUS_FEATURE_POWERINFO_STANDBY_DEBUG
-	pr_info("%s, active: %d, pending: %s for debug\n", __func__, active, pending_wakeup_source);
-#endif
 }
 EXPORT_SYMBOL_GPL(pm_get_active_wakeup_sources);
 
@@ -936,12 +977,11 @@ void pm_print_active_wakeup_sources(void)
 	srcuidx = srcu_read_lock(&wakeup_srcu);
 	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
 		if (ws->active) {
-			#ifdef OPLUS_FEATURE_POWERINFO_STANDBY_DEBUG
-			pr_info("active wakeup source: %s, %ld, %ld\n", ws->name, ws->active_count, ktime_to_ms(ws->total_time));
-			#else
-			pr_debug("active wakeup source: %s\n", ws->name);
-			#endif /* OPLUS_FEATURE_POWERINFO_STANDBY_DEBUG */
-			active = 1;
+			pr_info("active wakeup source: %s\n", ws->name);
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+			if (!check_for_block(ws))	// AP: check if wakelock is on wakelock blocker list
+#endif
+				active = 1;
 		} else if (!active &&
 			   (!last_activity_ws ||
 			    ktime_to_ns(ws->last_time) >
@@ -950,45 +990,30 @@ void pm_print_active_wakeup_sources(void)
 		}
 	}
 
-	if (!active && last_activity_ws) {
-		#ifdef OPLUS_FEATURE_POWERINFO_STANDBY_DEBUG
-		pr_info("last active wakeup source: %s, %ld, %ld\n",
-			last_activity_ws->name, last_activity_ws->active_count, ktime_to_ms(last_activity_ws->total_time));
-		#else
-		pr_debug("last active wakeup source: %s\n",
+	if (!active && last_activity_ws)
+		pr_info("last active wakeup source: %s\n",
 			last_activity_ws->name);
-		#endif /* OPLUS_FEATURE_POWERINFO_STANDBY_DEBUG */
-	}
 	srcu_read_unlock(&wakeup_srcu, srcuidx);
 }
 EXPORT_SYMBOL_GPL(pm_print_active_wakeup_sources);
 
-#ifdef OPLUS_FEATURE_POWERINFO_STANDBY
-void get_ws_listhead(struct list_head **ws)
+static void ws_printk(struct work_struct *work)
 {
-	if (ws)
-		*ws = &wakeup_sources;
+		pm_print_active_wakeup_sources();
+		queue_delayed_work(system_freezable_wq,
+		&ws_printk_work, msecs_to_jiffies(WORK_TIMEOUT));
 }
 
-void wakeup_srcu_read_lock(int *srcuidx)
+void pm_print_active_wakeup_sources_queue(bool on)
 {
-	*srcuidx = srcu_read_lock(&wakeup_srcu);
+	if (on) {
+		queue_delayed_work(system_freezable_wq, &ws_printk_work,
+		msecs_to_jiffies(WORK_TIMEOUT));
+	} else {
+		cancel_delayed_work(&ws_printk_work);
+	}
 }
-
-void wakeup_srcu_read_unlock(int srcuidx)
-{
-	srcu_read_unlock(&wakeup_srcu, srcuidx);
-}
-
-bool ws_all_release(void)
-{
-	unsigned int cnt, inpr;
-
-	pr_info("Enter: %s\n", __func__);
-	split_counters(&cnt, &inpr);
-	return (!inpr) ? true : false;
-}
-#endif /* OPLUS_FEATURE_POWERINFO_STANDBY */
+EXPORT_SYMBOL_GPL(pm_print_active_wakeup_sources_queue);
 
 /**
  * pm_wakeup_pending - Check if power transition in progress should be aborted.
@@ -1015,13 +1040,6 @@ bool pm_wakeup_pending(void)
 	spin_unlock_irqrestore(&events_lock, flags);
 
 	if (ret) {
-		#ifndef OPLUS_FEATURE_POWERINFO_STANDBY_DEBUG
-		pr_debug("PM: Wakeup pending, aborting suspend\n");
-		#else
-		pr_info("PM: Wakeup pending, aborting suspend\n");
-		wakeup_reasons_statics(IRQ_NAME_ABORT, WS_CNT_ABORT);
-		#endif /* OPLUS_FEATURE_POWERINFO_STANDBY_DEBUG */
-		pm_print_active_wakeup_sources();
 		pm_get_active_wakeup_sources(suspend_abort,
 					     MAX_SUSPEND_ABORT_LEN);
 		log_suspend_abort_reason(suspend_abort);
@@ -1063,14 +1081,10 @@ void pm_system_irq_wakeup(unsigned int irq_number)
 			else if (desc->action && desc->action->name)
 				name = desc->action->name;
 
-                        log_irq_wakeup_reason(irq_number);
+			log_irq_wakeup_reason(irq_number);
 			pr_warn("%s: %d triggered %s\n", __func__,
 					irq_number, name);
 
-			#ifdef OPLUS_FEATURE_POWERINFO_STANDBY
-			pr_info("%s: resume caused by irq=%d, name=%s\n", __func__, irq_number, name);
-			wakeup_reasons_statics(name, WS_CNT_POWERKEY|WS_CNT_RTCALARM);
-			#endif /* OPLUS_FEATURE_POWERINFO_STANDBY */
 		}
 		pm_wakeup_irq = irq_number;
 		pm_system_wakeup();
@@ -1252,24 +1266,12 @@ static const struct file_operations wakeup_sources_stats_fops = {
 	.read = seq_read,
 	.llseek = seq_lseek,
 	.release = single_release,
-#ifdef OPLUS_FEATURE_LOGKIT
-	.write          = watchdog_write,
-#endif /* OPLUS_FEATURE_LOGKIT */
 };
 
 static int __init wakeup_sources_debugfs_init(void)
 {
-	#ifndef OPLUS_FEATURE_LOGKIT
 	wakeup_sources_stats_dentry = debugfs_create_file("wakeup_sources",
 			S_IRUGO, NULL, NULL, &wakeup_sources_stats_fops);
-	#else /* OPLUS_FEATURE_LOGKIT */
-	wakeup_sources_stats_dentry = debugfs_create_file("wakeup_sources",
-			S_IRUGO| S_IWUGO, NULL, NULL, &wakeup_sources_stats_fops);
-	#endif /* OPLUS_FEATURE_LOGKIT */
-
-	#ifdef OPLUS_FEATURE_POWERINFO_STANDBY
-	proc_create_data("wakeup_sources", 0444, NULL, &wakeup_sources_stats_fops, NULL);
-	#endif /* OPLUS_FEATURE_POWERINFO_STANDBY */
 	return 0;
 }
 

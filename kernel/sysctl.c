@@ -94,18 +94,8 @@
 #ifdef CONFIG_LOCKUP_DETECTOR
 #include <linux/nmi.h>
 #endif
-#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
-#include <linux/multi_kswapd.h>
-#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
+
 #if defined(CONFIG_SYSCTL)
-
-#if defined(CONFIG_OPLUS_FEATURE_HUNG_TASK_ENHANCE) && defined(CONFIG_OPLUS_FEATURE_DEATH_HEALER)
-#include <soc/oplus/system/hung_task_enhance.h>
-#endif
-
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-#include <linux/sched_assist/sched_assist_common.h>
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
 
 /* External variables not in a header file. */
 extern int suid_dumpable;
@@ -113,6 +103,9 @@ extern int suid_dumpable;
 extern int core_uses_pid;
 extern char core_pattern[];
 extern unsigned int core_pipe_limit;
+#endif
+#ifdef CONFIG_DIRECT_SWAPPINESS
+extern int vm_direct_swapiness;
 #endif
 extern int pid_max;
 extern int extra_free_kbytes;
@@ -129,12 +122,6 @@ extern int sysctl_nr_trim_pages;
 static int sixty = 60;
 #endif
 
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-//#ifdef CONFIG_UXCHAIN_V2
-int sysctl_uxchain_v2 = 1;
-u64 sysctl_mmapsem_uninterruptable_time;
-#endif
-
 static int __maybe_unused neg_one = -1;
 static int __maybe_unused neg_three = -3;
 
@@ -147,29 +134,20 @@ static unsigned long zero_ul;
 static unsigned long one_ul = 1;
 static unsigned long long_max = LONG_MAX;
 static int one_hundred = 100;
-#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
-extern int direct_vm_swappiness;
-static int two_hundred = 200;
-#endif /*OPLUS_FEATURE_ZRAM_OPT*/
-
-#if defined(OPLUS_FEATURE_FG_IO_OPT) && defined(CONFIG_OPLUS_FG_IO_OPT)
-unsigned int sysctl_fg_io_opt = 1;
-#endif /*OPLUS_FEATURE_FG_IO_OPT*/
-
-#ifdef OPLUS_FEATURE_EDTASK_IMPROVE
-int sysctl_ed_task_enabled = 1;
-#endif
-
 static int one_thousand = 1000;
-
+#ifdef CONFIG_DIRECT_SWAPPINESS
+static int two_hundred = 200;
+#endif
 #ifdef CONFIG_SCHED_WALT
 static int two_million = 2000000;
 #endif
-#ifdef CONFIG_OPLUS_FEATURE_PANIC_FLUSH
+
+unsigned int sysctl_fg_io_opt = 1;
+
 unsigned int sysctl_ext4_fsync_enable = 1;
-unsigned int ext4_fsync_enable_status = 0;
-unsigned long sysctl_blkdev_issue_flush_count = 0;
-#endif /*CONFIG_OPLUS_FEATURE_PANIC_FLUSH*/
+unsigned int ext4_fsync_enable_status;
+unsigned long sysctl_blkdev_issue_flush_count;
+
 #ifdef CONFIG_PRINTK
 static int ten_thousand = 10000;
 #endif
@@ -340,53 +318,14 @@ static int max_sched_tunable_scaling = SCHED_TUNABLESCALING_END-1;
 #endif /* CONFIG_SMP */
 #endif /* CONFIG_SCHED_DEBUG */
 
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-int sysctl_sched_assist_enabled = 1;
-int sysctl_sched_assist_scene = 0;
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
-
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-int sysctl_cpu_multi_thread = 0;
+#ifdef CONFIG_UXCHAIN
+int sysctl_uxchain_enabled = 1;
+int sysctl_launcher_boost_enabled;
 #endif
-
 #ifdef CONFIG_COMPACTION
 static int min_extfrag_threshold;
 static int max_extfrag_threshold = 1000;
 #endif
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-
-int sysctl_slide_boost_enabled = 0;
-int sysctl_boost_task_threshold = 51;
-int sysctl_frame_rate = 60;
-int sched_frame_rate_handler(struct ctl_table *table, int write, void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	int ret;
-
-	if (write && *ppos)
-		*ppos = 0;
-
-	ret = proc_dointvec(table, write, buffer, lenp, ppos);
-
-	return ret;
-}
-
-int sysctl_sched_assist_input_boost_ctrl_handler(struct ctl_table * table, int write,
-	void __user * buffer, size_t * lenp, loff_t * ppos)
-{
-	int result;
-	static DEFINE_MUTEX(sa_boost_mutex);
-	mutex_lock(&sa_boost_mutex);
-	result = proc_dointvec(table, write, buffer, lenp, ppos);
-	if (!write)
-		goto out;
-	/*orms write just write this proc to tell us update input window*/
-	sched_assist_input_boost_duration  = jiffies_to_msecs(jiffies) + 1000; /*DEFAULT_INPUT_BOOST_DURATION*/
-out:
-	mutex_unlock(&sa_boost_mutex);
-	return result;
-}
-
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
 
 static struct ctl_table kern_table[] = {
 	{
@@ -511,6 +450,27 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= sched_updown_migrate_handler,
 	},
+{
+		.procname	= "fg_io_opt",
+		.data		= &sysctl_fg_io_opt,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+},
+	{
+		.procname       = "ext4_fsync_enable",
+		.data           = &sysctl_ext4_fsync_enable,
+		.maxlen         = sizeof(unsigned int),
+		.mode           = 0666,
+		.proc_handler   = proc_dointvec,
+	},
+	{
+		.procname       = "blkdev_issue_flush_count",
+		.data           = &sysctl_blkdev_issue_flush_count,
+		.maxlen         = sizeof(unsigned long),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+	},
 	{
 		.procname	= "sched_downmigrate",
 		.data		= &sysctl_sched_capacity_margin_down,
@@ -518,42 +478,6 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= sched_updown_migrate_handler,
 	},
-#if defined(OPLUS_FEATURE_FG_IO_OPT) && defined(CONFIG_OPLUS_FG_IO_OPT)
-	{
-		.procname	= "fg_io_opt",
-		.data		= &sysctl_fg_io_opt,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-#endif /*OPLUS_FEATURE_FG_IO_OPT*/
-#ifdef OPLUS_FEATURE_EDTASK_IMPROVE
-	{
-		.procname   = "ed_task_enabled",
-		.data       = &sysctl_ed_task_enabled,
-		.maxlen     = sizeof(int),
-		.mode       = 0666,
-		.proc_handler = proc_dointvec,
-	},
-#endif
-#ifdef CONFIG_OPLUS_FEATURE_PANIC_FLUSH
-{
-		.procname	= "ext4_fsync_enable",
-		.data		= &sysctl_ext4_fsync_enable,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0666,
-		.proc_handler	= proc_dointvec,
-},
-#endif
-#ifdef CONFIG_OPLUS_FEATURE_PANIC_FLUSH
-{
-		.procname	= "blkdev_issue_flush_count",
-		.data		= &sysctl_blkdev_issue_flush_count,
-		.maxlen		= sizeof(unsigned long),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-},
-#endif
 #ifdef CONFIG_SCHED_DEBUG
 	{
 		.procname	= "sched_min_granularity_ns",
@@ -1078,7 +1002,7 @@ static struct ctl_table kern_table[] = {
 		.data		= &console_loglevel,
 		.maxlen		= 4*sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
+		.proc_handler	= proc_dointvec_oem,
 	},
 	{
 		.procname	= "printk_ratelimit",
@@ -1376,25 +1300,7 @@ static struct ctl_table kern_table[] = {
 		.extra1		= &zero,
 		.extra2		= &one,
 	},
-#if defined(CONFIG_OPLUS_FEATURE_HUNG_TASK_ENHANCE) && defined(CONFIG_OPLUS_FEATURE_DEATH_HEALER)
-/* record the hung task killing */
-	{
-		.procname	= "hung_task_kill",
-		.data		= &sysctl_hung_task_oplus_kill,
-		.maxlen		= 128,
-		.mode		= 0666,
-		.proc_handler	= proc_dostring,
-	},
-/* Foreground background optimization,change max io count */
-	{
-		.procname	= "hung_task_maxiowait_count",
-		.data		= &sysctl_hung_task_maxiowait_count,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &five,
-	},
-#endif
+
 #endif
 #ifdef CONFIG_RT_MUTEXES
 	{
@@ -1536,76 +1442,18 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 #endif
-
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
+#ifdef CONFIG_UXCHAIN
 	{
-		.procname	= "sched_assist_enabled",
-		.data		= &sysctl_sched_assist_enabled,
-		.maxlen		= sizeof(int),
-		.mode		= 0666,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "sched_assist_scene",
-		.data		= &sysctl_sched_assist_scene,
-		.maxlen		= sizeof(int),
-		.mode		= 0666,
-		.proc_handler = sysctl_sched_assist_scene_handler,
-	},
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-	{
-		.procname	= "cpu_multi_thread",
-		.data		= &sysctl_cpu_multi_thread,
-		.maxlen 	= sizeof(int),
-		.mode		= 0666,
-		.proc_handler = proc_dointvec,
-	},
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-	{
-		.procname	= "slide_boost_enabled",
-		.data		= &sysctl_slide_boost_enabled,
-		.maxlen 	= sizeof(int),
-		.mode		= 0666,
-		.proc_handler = proc_dointvec,
-	},
-	{
-		.procname	= "boost_task_threshold",
-		.data		= &sysctl_boost_task_threshold,
-		.maxlen 	= sizeof(int),
-		.mode		= 0666,
-		.proc_handler = proc_dointvec,
-	},
-	{
-		.procname	= "input_boost_enabled",
-		.data		= &sysctl_input_boost_enabled,
-		.maxlen 	= sizeof(int),
-		.mode		= 0666,
-		.proc_handler = sysctl_sched_assist_input_boost_ctrl_handler,
-	},
-	{
-		.procname	= "frame_rate",
-		.data		= &sysctl_frame_rate,
-		.maxlen 	= sizeof(int),
-		.mode		= 0666,
-		.proc_handler = sched_frame_rate_handler,
-	},
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
-
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-//#ifdef CONFIG_UXCHAIN_V2
-	{
-		.procname	= "uxchain_v2",
-		.data		= &sysctl_uxchain_v2,
+		.procname	= "uxchain_enabled",
+		.data		= &sysctl_uxchain_enabled,
 		.maxlen = sizeof(int),
 		.mode		= 0666,
 		.proc_handler = proc_dointvec,
 	},
 	{
-		.procname	= "mmapsem_uninterruptable_time",
-		.data		= &sysctl_mmapsem_uninterruptable_time,
-		.maxlen = sizeof(u64),
+		.procname	= "launcher_boost_enabled",
+		.data		= &sysctl_launcher_boost_enabled,
+		.maxlen = sizeof(int),
 		.mode		= 0666,
 		.proc_handler = proc_dointvec,
 	},
@@ -1668,7 +1516,7 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= overcommit_kbytes_handler,
 	},
 	{
-		.procname	= "page-cluster",
+		.procname	= "page-cluster", 
 		.data		= &page_cluster,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
@@ -1744,59 +1592,38 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
-#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+#ifdef CONFIG_DIRECT_SWAPPINESS
 		.extra2		= &two_hundred,
 #else
 		.extra2		= &one_hundred,
-#endif /*OPLUS_FEATURE_ZRAM_OPT*/
-	},
-#ifdef CONFIG_DAYAMIC_TUNNING_SWAPPINESS
-	{
-		.procname	= "vm_swappiness_threshold1",
-		.data		= &vm_swappiness_threshold1,
-		.maxlen		= sizeof(vm_swappiness_threshold1),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &two_hundred,
-	},
-	{
-		.procname	= "vm_swappiness_threshold2",
-		.data		= &vm_swappiness_threshold2,
-		.maxlen		= sizeof(vm_swappiness_threshold2),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-		.extra2		= &two_hundred,
-	},
-	{
-		.procname	= "swappiness_threshold1_size",
-		.data		= &swappiness_threshold1_size,
-		.maxlen		= sizeof(swappiness_threshold1_size),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-	},
-	{
-		.procname	= "swappiness_threshold2_size",
-		.data		= &swappiness_threshold2_size,
-		.maxlen		= sizeof(swappiness_threshold2_size),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
-	},
 #endif
-#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+	},
+#ifdef CONFIG_DIRECT_SWAPPINESS
 	{
 		.procname	= "direct_swappiness",
-		.data		= &direct_vm_swappiness,
-		.maxlen 	= sizeof(direct_vm_swappiness),
+		.data		= &vm_direct_swapiness,
+		.maxlen		= sizeof(vm_direct_swapiness),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1 	= &zero,
-		.extra2 	= &two_hundred,
+		.extra1		= &zero,
+		.extra2		= &two_hundred,
 	},
 #endif
+	{
+		.procname	= "breath_period",
+		.data		= &vm_breath_period,
+		.maxlen		= sizeof(vm_breath_period),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+	},
+	{
+		.procname	= "breath_priority",
+		.data		= &vm_breath_priority,
+		.maxlen		= sizeof(vm_breath_priority),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
 	{
 		.procname       = "want_old_faultaround_pte",
 		.data           = &want_old_faultaround_pte,
@@ -1866,12 +1693,7 @@ static struct ctl_table vm_table[] = {
 		.procname	= "compact_memory",
 		.data		= &sysctl_compact_memory,
 		.maxlen		= sizeof(int),
-#ifdef VENDOR_EDIT
-		.mode		= 0222,
-#else
 		.mode		= 0200,
-
-#endif /*VENDOR_EDIT*/
 		.proc_handler	= sysctl_compaction_handler,
 	},
 	{
@@ -1902,17 +1724,6 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= min_free_kbytes_sysctl_handler,
 		.extra1		= &zero,
 	},
-#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
-	{
-	.procname	= "kswapd_threads",
-	.data		= &kswapd_threads,
-	.maxlen		= sizeof(kswapd_threads),
-	.mode		= 0644,
-	.proc_handler	= kswapd_threads_sysctl_handler,
-	.extra1		= &one,
-	.extra2		= &max_kswapd_threads,
-	},
-#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
 	{
 		.procname	= "watermark_scale_factor",
 		.data		= &watermark_scale_factor,
@@ -2269,7 +2080,7 @@ static struct ctl_table fs_table[] = {
 		.mode		= 0555,
 		.child		= inotify_table,
 	},
-#endif
+#endif	
 #ifdef CONFIG_EPOLL
 	{
 		.procname	= "epoll",
@@ -2715,12 +2526,12 @@ static int __do_proc_dointvec(void *tbl_data, struct ctl_table *table,
 	int *i, vleft, first = 1, err = 0;
 	size_t left;
 	char *kbuf = NULL, *p;
-
+	
 	if (!tbl_data || !table->maxlen || !*lenp || (*ppos && !write)) {
 		*lenp = 0;
 		return 0;
 	}
-
+	
 	i = (int *) tbl_data;
 	vleft = table->maxlen / sizeof(*i);
 	left = *lenp;
@@ -2946,7 +2757,7 @@ static int do_proc_douintvec(struct ctl_table *table, int write,
  * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
- * values from/to the user buffer, treated as an ASCII string.
+ * values from/to the user buffer, treated as an ASCII string. 
  *
  * Returns 0 on success.
  */
@@ -2955,6 +2766,24 @@ int proc_dointvec(struct ctl_table *table, int write,
 {
 	return do_proc_dointvec(table, write, buffer, lenp, ppos, NULL, NULL);
 }
+static unsigned int oem_en_chg_prk_lv = 1;
+module_param(oem_en_chg_prk_lv, uint, 0644);
+
+int proc_dointvec_oem(struct ctl_table *table, int write,
+		     void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+    if(oem_en_chg_prk_lv || !write )
+		return do_proc_dointvec(table, write, buffer, lenp, ppos, NULL, NULL);
+    else
+		return -ENOSYS;
+}
+static int __init oem_disable_chg_prk_lv(char *str)
+{
+	oem_en_chg_prk_lv = 0;
+	return 0;
+}
+early_param("debug", oem_disable_chg_prk_lv);
+
 
 /**
  * proc_douintvec - read a vector of unsigned integers
@@ -3402,7 +3231,7 @@ static int do_proc_dointvec_ms_jiffies_conv(bool *negp, unsigned long *lvalp,
  * @ppos: file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
- * values from/to the user buffer, treated as an ASCII string.
+ * values from/to the user buffer, treated as an ASCII string. 
  * The values read are assumed to be in seconds, and are converted into
  * jiffies.
  *
@@ -3424,8 +3253,8 @@ int proc_dointvec_jiffies(struct ctl_table *table, int write,
  * @ppos: pointer to the file position
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
- * values from/to the user buffer, treated as an ASCII string.
- * The values read are assumed to be in 1/USER_HZ seconds, and
+ * values from/to the user buffer, treated as an ASCII string. 
+ * The values read are assumed to be in 1/USER_HZ seconds, and 
  * are converted into jiffies.
  *
  * Returns 0 on success.
@@ -3447,8 +3276,8 @@ int proc_dointvec_userhz_jiffies(struct ctl_table *table, int write,
  * @ppos: the current position in the file
  *
  * Reads/writes up to table->maxlen/sizeof(unsigned int) integer
- * values from/to the user buffer, treated as an ASCII string.
- * The values read are assumed to be in 1/1000 seconds, and
+ * values from/to the user buffer, treated as an ASCII string. 
+ * The values read are assumed to be in 1/1000 seconds, and 
  * are converted into jiffies.
  *
  * Returns 0 on success.

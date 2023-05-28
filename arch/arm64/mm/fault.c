@@ -49,9 +49,6 @@
 #include <acpi/ghes.h>
 #include <soc/qcom/scm.h>
 #include <trace/events/exception.h>
-#if defined(OPLUS_FEATURE_IOMONITOR) && defined(CONFIG_IOMONITOR)
-#include <linux/iomonitor/iomonitor.h>
-#endif /*OPLUS_FEATURE_IOMONITOR*/
 
 struct fault_info {
 	int	(*fn)(unsigned long addr, unsigned int esr,
@@ -430,6 +427,9 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 	tsk = current;
 	mm  = tsk->mm;
 
+#ifdef CONFIG_CGROUP_IOLIMIT
+	task_set_in_pagefault(tsk);
+#endif
 	/*
 	 * If we're in an interrupt or have no user context, we must not take
 	 * the fault.
@@ -504,9 +504,15 @@ retry:
 		 * the mmap_sem because it would already be released
 		 * in __lock_page_or_retry in mm/filemap.c.
 		 */
+#ifdef CONFIG_MEMPLUS
+		count_vm_event(RETRYPAGE);
+#endif
 		if (fatal_signal_pending(current)) {
 			if (!user_mode(regs))
 				goto no_context;
+#ifdef CONFIG_CGROUP_IOLIMIT
+			task_clear_in_pagefault(tsk);
+#endif
 			return 0;
 		}
 
@@ -544,9 +550,6 @@ done:
 		 */
 		if (major) {
 			tsk->maj_flt++;
-#if defined(OPLUS_FEATURE_IOMONITOR) && defined(CONFIG_IOMONITOR)
-			iomonitor_update_fs_stats(FS_MAJOR_FAULT, 1);
-#endif /*OPLUS_FEATURE_IOMONITOR*/
 			perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, regs,
 				      addr);
 		} else {
@@ -572,6 +575,9 @@ done:
 		 * oom-killed).
 		 */
 		pagefault_out_of_memory();
+#ifdef CONFIG_CGROUP_IOLIMIT
+		task_clear_in_pagefault(tsk);
+#endif
 		return 0;
 	}
 
@@ -596,10 +602,16 @@ done:
 	}
 
 	__do_user_fault(tsk, addr, esr, sig, code, regs, fault);
+#ifdef CONFIG_CGROUP_IOLIMIT
+	task_clear_in_pagefault(tsk);
+#endif
 	return 0;
 
 no_context:
 	__do_kernel_fault(addr, esr, regs);
+#ifdef CONFIG_CGROUP_IOLIMIT
+	task_clear_in_pagefault(tsk);
+#endif
 	return 0;
 }
 

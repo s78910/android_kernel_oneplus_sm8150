@@ -4842,12 +4842,12 @@ VL53L1_Error VL53L1_dynamic_xtalk_correction_calc_required_samples(
 
 	LOG_FUNCTION_START("");
 
-	temp64a = (uint64_t)(pxmonitor->VL53L1_p_021 +
-		pxmonitor->VL53L1_p_020);
+	temp64a = pxmonitor->VL53L1_p_021 +
+		pxmonitor->VL53L1_p_020;
 	temp64a = do_division_u((temp64a * 1000), peak_duration_us);
 	temp64a = do_division_u((temp64a * 1000), peak_duration_us);
 
-	temp64z = (uint64_t)pconfig->noise_margin * pxmonitor->VL53L1_p_006;
+	temp64z = pconfig->noise_margin * pxmonitor->VL53L1_p_006;
 	temp64a = temp64a * 1000 * 256;
 	temp64a = do_division_u(temp64a, temp64z);
 	temp64a = temp64a * 1000 * 256;

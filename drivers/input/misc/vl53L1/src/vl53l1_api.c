@@ -143,13 +143,6 @@
 #error Must define at least 5 zones in MAX_USER_ZONES constant
 #endif
 
-
-#ifdef VL53L1_NOCALIB
-#endif
-
-#ifndef VL53L1_NOCALIB
-#endif
-
 #define LOG_FUNCTION_START(fmt, ...) \
 	_LOG_FUNCTION_START(VL53L1_TRACE_MODULE_API, fmt, ##__VA_ARGS__)
 #define LOG_FUNCTION_END(status, ...) \
@@ -2427,7 +2420,15 @@ static VL53L1_Error SetTargetData(VL53L1_DEV Dev,
 		pRangeData->RangeStatus = VL53L1_RANGESTATUS_RANGE_VALID;
 	}
 
-
+    if ((pRangeData->RangeStatus == VL53L1_RANGESTATUS_RANGE_VALID) &&
+        (active_results == 0)) {
+        pRangeData->RangeStatus = VL53L1_RANGESTATUS_NONE;
+        pRangeData->SignalRateRtnMegaCps = 0;
+        pRangeData->SigmaMilliMeter = 0;
+        pRangeData->RangeMilliMeter = 8191;
+        pRangeData->RangeMaxMilliMeter = 8191;
+        pRangeData->RangeMinMilliMeter = 8191;
+    }
 
 	if (pRangeData->RangeStatus == VL53L1_RANGESTATUS_RANGE_VALID) {
 		PresetMode = VL53L1DevDataGet(Dev,
@@ -2974,39 +2975,11 @@ VL53L1_Error VL53L1_PerformXTalkCalibration(VL53L1_DEV Dev,
 		BDTable[VL53L1_TUNING_XTALK_FULL_ROI_TARGET_DISTANCE_MM];
 		Status = VL53L1_run_hist_xtalk_extraction(Dev, CalDistanceMm,
 				&UnfilteredStatus);
+		break;
+	default:
+		Status = VL53L1_ERROR_INVALID_PARAMS;
+	}
 
-/*fix for low xtalk coverglass*/
-              {
-                int i;
-                uint32_t sum = 0;
-                VL53L1_CalibrationData_t  caldata;
-
-                VL53L1_GetCalibrationData(Dev, &caldata);
-                for (i=0;i<12;i++){
-                      sum += caldata.xtalkhisto.xtalk_shape.bin_data[i];
-                }
-
-                if (((caldata.customer.algo__crosstalk_compensation_plane_offset_kcps) > 1024000)||
-                                   ((sum>1048) || (sum<1000)))
-                {
-                        caldata.customer.algo__crosstalk_compensation_plane_offset_kcps= 50;
-                        Dev->LLData.xtalk_cal.algo__crosstalk_compensation_plane_offset_kcps = 50;
-                        caldata.xtalkhisto.xtalk_shape.bin_data[0]=307;
-                        caldata.xtalkhisto.xtalk_shape.bin_data[1]=410;
-                        caldata.xtalkhisto.xtalk_shape.bin_data[2]=410;
-                        caldata.xtalkhisto.xtalk_shape.bin_data[3]=307;
-                        for (i=4;i<12;i++){
-                                   caldata.xtalkhisto.xtalk_shape.bin_data[i]=0;
-                        }
-                        VL53L1_SetCalibrationData(Dev, &caldata);
-                }
-              }
-              /*end of fix for low xtalk coverglass*/
-
-              break;
-       default:
-              Status = VL53L1_ERROR_INVALID_PARAMS;
-       }
 
 	if (Status == VL53L1_ERROR_NONE) {
 		Status = VL53L1_get_current_xtalk_settings(Dev, &xtalk);
@@ -3141,54 +3114,6 @@ VL53L1_Error VL53L1_PerformOffsetCalibration(VL53L1_DEV Dev,
 	LOG_FUNCTION_END(Status);
 	return Status;
 }
-#ifdef OFFSET_CALIB
-VL53L1_Error VL53L1_PerformOffsetCalibration(VL53L1_DEV Dev,
-	int32_t CalDistanceMilliMeter)
-{
-	VL53L1_Error Status = VL53L1_ERROR_NONE;
-	VL53L1_Error UnfilteredStatus;
-	VL53L1_OffsetCalibrationMode   offset_cal_mode;
-
-	LOG_FUNCTION_START("");
-
-	if (Status == VL53L1_ERROR_NONE)
-		Status =  VL53L1_get_offset_calibration_mode(Dev,
-				&offset_cal_mode);
-
-	if (Status != VL53L1_ERROR_NONE) {
-		LOG_FUNCTION_END(Status);
-		return Status;
-	}
-
-	if ((offset_cal_mode ==
-		VL53L1_OFFSETCALIBRATIONMODE__MM1_MM2__STANDARD) ||
-		(offset_cal_mode ==
-		VL53L1_OFFSETCALIBRATIONMODE__MM1_MM2__STANDARD_PRE_RANGE_ONLY
-		)) {
-		if (Status == VL53L1_ERROR_NONE)
-			Status = VL53L1_run_offset_calibration(
-				Dev,
-				(int16_t)CalDistanceMilliMeter,
-				&UnfilteredStatus);
-	} else {
-		Status = VL53L1_ERROR_INVALID_PARAMS;
-	}
-	LOG_FUNCTION_END(Status);
-	return Status;
-}
-#endif
-#ifdef OFFSET_CALIB_EMPTY
-VL53L1_Error VL53L1_PerformOffsetCalibration(VL53L1_DEV Dev,
-	int32_t CalDistanceMilliMeter)
-{
-	VL53L1_Error Status = VL53L1_ERROR_NOT_SUPPORTED;
-
-	SUPPRESS_UNUSED_WARNING(Dev);
-	SUPPRESS_UNUSED_WARNING(CalDistanceMilliMeter);
-
-	return Status;
-}
-#endif
 
 VL53L1_Error VL53L1_PerformOffsetSimpleCalibration(VL53L1_DEV Dev,
 	int32_t CalDistanceMilliMeter)

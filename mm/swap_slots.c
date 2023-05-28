@@ -329,12 +329,7 @@ swp_entry_t get_swap_page(struct page *page)
 	 */
 	cache = raw_cpu_ptr(&swp_slots);
 
-#if defined(CONFIG_NANDSWAP)
-	if (check_cache_active() &&
-		!current_is_nswapoutd()) {
-#else
 	if (check_cache_active()) {
-#endif
 		mutex_lock(&cache->alloc_lock);
 		if (cache->slots) {
 repeat:
@@ -353,6 +348,7 @@ repeat:
 			return entry;
 	}
 
+	__set_memplus_entry(entry, page_private(page));
 	get_swap_pages(1, false, &entry);
 
 	return entry;

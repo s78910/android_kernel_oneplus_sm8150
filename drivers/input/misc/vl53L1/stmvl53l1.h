@@ -83,29 +83,29 @@
 /** @ingroup vl53l1_mod_dbg
  * @{
  */
-#if 0
+#if 1
 #define DEBUG	1
 #endif
-#if 0
+#if 1
 #define FORCE_CONSOLE_DEBUG
 #endif
 
 extern int stmvl53l1_enable_debug;
 
 #ifdef DEBUG
-#ifdef FORCE_CONSOLE_DEBUG
+#	ifdef FORCE_CONSOLE_DEBUG
 #define vl53l1_dbgmsg(str, ...) do { \
 	if (stmvl53l1_enable_debug) \
 		pr_info("%s: " str, __func__, ##__VA_ARGS__); \
 } while (0)
-#else
+#	else
 #define vl53l1_dbgmsg(str, ...) do { \
 	if (stmvl53l1_enable_debug) \
-		pr_info("%s: " str, __func__, ##__VA_ARGS__); \
+		pr_debug("%s: " str, __func__, ##__VA_ARGS__); \
 } while (0)
-#endif
+#	endif
 #else
-#define vl53l1_dbgmsg(...) (void)0
+#	define vl53l1_dbgmsg(...) (void)0
 #endif
 
 /**

@@ -1,15 +1,10 @@
 /***********************************************************
-** Copyright (C), 2008-2019, OPLUS Mobile Comm Corp., Ltd.
-** VENDOR_EDIT
 ** File: - panic_flush.c
 ** Description:  code to flush device cache in panic
 **
 ** Version: 1.0
-** Date : 2019/08/27
-**
-** ------------------ Revision History:------------------------
-** <author> <data> <version > <desc>
-** yanwu 2019/08/27 1.0  add the file
+** Date: 2019/08/27
+** Activity: [OSP-3675]
 ****************************************************************/
 
 #define DEBUG
@@ -18,11 +13,8 @@
 #include <linux/delay.h>
 #include <linux/blkdev.h>
 #include <linux/kthread.h>
-#include <linux/workqueue.h>
 
 #define PANIC_FLUSH_POLL_MS (10)
-
-
 struct panic_flush_control {
 	struct task_struct *flush_thread;
 	wait_queue_head_t flush_wq;
@@ -31,7 +23,7 @@ struct panic_flush_control {
 };
 
 static struct panic_flush_control *pfc;
-static void panic_issue_flush(struct super_block *sb , void *arg)
+static void panic_issue_flush(struct super_block *sb ,void *arg)
 {
 	int ret = -1;
 	int *flush_count = (int *)arg;
@@ -50,8 +42,8 @@ static int panic_flush_thread(void *data)
 repeat:
 	if (kthread_should_stop())
 		return 0;
-	wait_event(pfc->flush_wq, kthread_should_stop() ||
-			atomic_read(&pfc->flush_issuing) > 0);
+
+	wait_event(pfc->flush_wq, kthread_should_stop() || atomic_read(&pfc->flush_issuing) > 0);
 	if (atomic_read(&pfc->flush_issuing) > 0) {
 		iterate_supers(panic_issue_flush, &flush_count);
 		pr_emerg("Up to now, total %d panic_issue_flush_count\n", flush_count);
@@ -61,19 +53,11 @@ repeat:
 	goto repeat;
 }
 
-extern bool is_fulldump_enable(void);
-
-static inline bool need_flush_device_cache(void)
-{
-	if (is_fulldump_enable())
-		return false;
-	return true;
-}
-
+extern int sysctl_ext4_fsync_enable;
 int panic_flush_device_cache(int timeout)
 {
 	pr_emerg("%s\n", __func__);
-	if (!need_flush_device_cache()) {
+	if (!pfc || !sysctl_ext4_fsync_enable) {
 		pr_emerg("%s: skip flush device cache\n", __func__);
 		return timeout;
 	}
@@ -126,5 +110,6 @@ static void __exit destroy_panic_flush_control(void)
 }
 module_init(create_panic_flush_control);
 module_exit(destroy_panic_flush_control);
-MODULE_DESCRIPTION("OPLUS panic flush control");
+MODULE_DESCRIPTION("ONEPLUS panic flush control");
 MODULE_LICENSE("GPL v2");
+

@@ -25,6 +25,8 @@
 #include <linux/uaccess.h>
 #include <linux/soc/qcom/smem.h>
 #include <asm/arch_timer.h>
+#include <linux/kobject.h>
+#include <linux/sysfs.h>
 #include "rpmh_master_stat.h"
 
 #define UNIT_DIST 0x14
@@ -41,7 +43,6 @@ enum master_smem_id {
 	SLPI,
 	GPU,
 	DISPLAY,
-	SLPI_ISLAND = 613,
 };
 
 enum master_pid {
@@ -71,10 +72,8 @@ struct msm_rpmh_master_data {
 static const struct msm_rpmh_master_data rpmh_masters[] = {
 	{"MPSS", MPSS, PID_MPSS},
 	{"ADSP", ADSP, PID_ADSP},
-	{"ADSP_ISLAND", SLPI_ISLAND, PID_ADSP},
 	{"CDSP", CDSP, PID_CDSP},
 	{"SLPI", SLPI, PID_SLPI},
-	{"SLPI_ISLAND", SLPI_ISLAND, PID_SLPI},
 	{"GPU", GPU, PID_GPU},
 	{"DISPLAY", DISPLAY, PID_DISPLAY},
 };
@@ -95,10 +94,6 @@ struct msm_rpmh_profile_unit {
 struct rpmh_master_stats_prv_data {
 	struct kobj_attribute ka;
 	struct kobject *kobj;
-#ifdef OPLUS_FEATURE_POWERINFO_RPMH
-    struct kobj_attribute  opluska;
-	struct kobject * opluskobj;
-#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
 };
 
 static struct msm_rpmh_master_stats apss_master_stats;
@@ -106,20 +101,11 @@ static void __iomem *rpmh_unit_base;
 
 static DEFINE_MUTEX(rpmh_stats_mutex);
 
-#ifdef OPLUS_FEATURE_POWERINFO_RPMH
-static DEFINE_MUTEX( oplus_rpmh_stats_mutex);
-
-#define MSM_ARCH_TIMER_FREQ 19200000
-static inline u64 get_time_in_msec(u64 counter)
-{
-	do_div(counter, (MSM_ARCH_TIMER_FREQ/MSEC_PER_SEC));
-	return counter;
-}
-static ssize_t  oplus_rpmh_master_stats_print_data(char *prvbuf, ssize_t length,
+static void msm_rpmh_master_stats_print_data(struct seq_file *s,
 				struct msm_rpmh_master_stats *record,
 				const char *name)
 {
-	uint64_t accumulated_duration = record->accumulated_duration;
+	uint64_t temp_accumulated_duration = record->accumulated_duration;
 	/*
 	 * If a master is in sleep when reading the sleep stats from SMEM
 	 * adjust the accumulated sleep duration to show actual sleep time.
@@ -127,125 +113,53 @@ static ssize_t  oplus_rpmh_master_stats_print_data(char *prvbuf, ssize_t length,
 	 * the purpose of computing battery utilization.
 	 */
 	if (record->last_entered > record->last_exited)
-		accumulated_duration +=
+		temp_accumulated_duration +=
 				(arch_counter_get_cntvct()
 				- record->last_entered);
 
-	return snprintf(prvbuf, length, "%s:%x:%llx\n",
-			name,record->counts,
-			get_time_in_msec(accumulated_duration));
-}
-#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
-
-
-static ssize_t msm_rpmh_master_stats_print_data(char *prvbuf, ssize_t length,
-				struct msm_rpmh_master_stats *record,
-				const char *name)
-{
-	uint64_t accumulated_duration = record->accumulated_duration;
-	/*
-	 * If a master is in sleep when reading the sleep stats from SMEM
-	 * adjust the accumulated sleep duration to show actual sleep time.
-	 * This ensures that the displayed stats are real when used for
-	 * the purpose of computing battery utilization.
-	 */
-	if (record->last_entered > record->last_exited)
-		accumulated_duration +=
-				(arch_counter_get_cntvct()
-				- record->last_entered);
-#ifndef OPLUS_FEATURE_POWERINFO_RPMH
-	return snprintf(prvbuf, length, "%s\n\tVersion:0x%x\n"
+	seq_printf(s, "%s\n\tVersion:0x%x\n"
 			"\tSleep Count:0x%x\n"
 			"\tSleep Last Entered At:0x%llx\n"
 			"\tSleep Last Exited At:0x%llx\n"
 			"\tSleep Accumulated Duration:0x%llx\n\n",
-			name, record->version_id, record->counts,
-			record->last_entered, record->last_exited,
-			accumulated_duration);
-#else
-	return snprintf(prvbuf, length, "%s\n\tVersion:0x%x\n"
-			"\tSleep Count:0x%x\n"
-			"\tSleep Last Entered At:0x%llx\n"
-			"\tSleep Last Exited At:0x%llx\n"
-			"\tSleep Accumulated Duration:0x%llx\n"
-			"\tSleep Accumulated Duration(mS):0x%llx\n"
-			"\tSleep Accumulated Duration(mS):%llu\n\n",
-			name, record->version_id, record->counts,
-			record->last_entered, record->last_exited,
-			accumulated_duration, get_time_in_msec(accumulated_duration), get_time_in_msec(accumulated_duration));
-#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
+			name, record->version_id,
+			record->counts, record->last_entered,
+			record->last_exited, temp_accumulated_duration);
 }
 
-static ssize_t msm_rpmh_master_stats_show(struct kobject *kobj,
-				struct kobj_attribute *attr, char *buf)
+static int rpmh_master_stats_show(struct seq_file *s, void *data)
 {
-	ssize_t length;
-	int i = 0;
-	struct msm_rpmh_master_stats *record = NULL;
-
-	mutex_lock(&rpmh_stats_mutex);
-
-	/* First Read APSS master stats */
-
-	length = msm_rpmh_master_stats_print_data(buf, PAGE_SIZE,
-						&apss_master_stats, "APSS");
-
-	/* Read SMEM data written by other masters */
-
-	for (i = 0; i < ARRAY_SIZE(rpmh_masters); i++) {
-		record = (struct msm_rpmh_master_stats *) qcom_smem_get(
-					rpmh_masters[i].pid,
-					rpmh_masters[i].smem_id, NULL);
-		if (!IS_ERR_OR_NULL(record) && (PAGE_SIZE - length > 0))
-			length += msm_rpmh_master_stats_print_data(
-					buf + length, PAGE_SIZE - length,
-					record,
-					rpmh_masters[i].master_name);
-	}
-
-	mutex_unlock(&rpmh_stats_mutex);
-
-	return length;
-}
-
-#ifdef OPLUS_FEATURE_POWERINFO_RPMH
-static ssize_t  oplus_rpmh_master_stats_show(struct kobject *kobj,
-				struct kobj_attribute *attr, char *buf)
-{
-	ssize_t length = 0;
 	int i = 0;
 	size_t size = 0;
 	struct msm_rpmh_master_stats *record = NULL;
 
-	mutex_lock(& oplus_rpmh_stats_mutex);
-
+	mutex_lock(&rpmh_stats_mutex);
 	/* First Read APSS master stats */
-
-	length =  oplus_rpmh_master_stats_print_data(buf, PAGE_SIZE,
-						&apss_master_stats, "APSS");
+	msm_rpmh_master_stats_print_data(s, &apss_master_stats,
+		"APSS");
 
 	/*
 	 * Read SMEM data written by masters
 	 */
 
-
-
 	for (i = 0; i < ARRAY_SIZE(rpmh_masters); i++) {
 		record = (struct msm_rpmh_master_stats *) qcom_smem_get(
 					rpmh_masters[i].pid,
 					rpmh_masters[i].smem_id, &size);
-		if (!IS_ERR_OR_NULL(record) && (PAGE_SIZE - length > 0))
-			length +=  oplus_rpmh_master_stats_print_data(
-					buf + length, PAGE_SIZE - length,
-					record,
-					rpmh_masters[i].master_name);
+		if (!IS_ERR_OR_NULL(record))
+			msm_rpmh_master_stats_print_data(s, record,
+			rpmh_masters[i].master_name);
 	}
 
-	mutex_unlock(&oplus_rpmh_stats_mutex);
+	mutex_unlock(&rpmh_stats_mutex);
 
-	return length;
+	return 0;
 }
-#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
+
+int rpmh_master_stats_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, rpmh_master_stats_show, inode->i_private);
+}
 
 static inline void msm_rpmh_apss_master_stats_update(
 				struct msm_rpmh_profile_unit *profile_unit)
@@ -289,94 +203,84 @@ void msm_rpmh_master_stats_update(void)
 }
 EXPORT_SYMBOL(msm_rpmh_master_stats_update);
 
+ssize_t master_stats_show(struct kobject *kobj,
+					  struct kobj_attribute *attr, char *buf)
+{
+	int i = 0;
+	size_t size = 0;
+	struct msm_rpmh_master_stats *record = NULL;
+	char stats_buf[1024];
+	uint64_t temp_accumulated_duration = 0;
+
+	mutex_lock(&rpmh_stats_mutex);
+
+	/* First Read APSS master stats */
+
+	temp_accumulated_duration = apss_master_stats.accumulated_duration;
+
+	if (apss_master_stats.last_entered > apss_master_stats.last_exited)
+		temp_accumulated_duration +=
+				(arch_counter_get_cntvct()
+				- apss_master_stats.last_entered);
+
+	snprintf(stats_buf, sizeof(stats_buf),
+			"APSS\n\tVersion:0x%x\n"
+			"\tSleep Count:0x%x\n"
+			"\tSleep Last Entered At:0x%llx\n"
+			"\tSleep Last Exited At:0x%llx\n"
+			"\tSleep Accumulated Duration:0x%llx\n\n",
+			apss_master_stats.version_id,
+			apss_master_stats.counts, apss_master_stats.last_entered,
+			apss_master_stats.last_exited, temp_accumulated_duration);
+	/*
+	 * Read SMEM data written by masters
+	 */
+
+	for (i = 0; i < ARRAY_SIZE(rpmh_masters); i++) {
+		record = (struct msm_rpmh_master_stats *) qcom_smem_get(
+					rpmh_masters[i].pid,
+					rpmh_masters[i].smem_id, &size);
+		if (!IS_ERR_OR_NULL(record)) {
+			temp_accumulated_duration = record->accumulated_duration;
+
+			if (record->last_entered > record->last_exited)
+				temp_accumulated_duration +=
+						(arch_counter_get_cntvct()
+						- record->last_entered);
+
+			snprintf(stats_buf + strlen(stats_buf), sizeof(stats_buf),
+					"%s\n\tVersion:0x%x\n"
+					"\tSleep Count:0x%x\n"
+					"\tSleep Last Entered At:0x%llx\n"
+					"\tSleep Last Exited At:0x%llx\n"
+					"\tSleep Accumulated Duration:0x%llx\n\n",
+					rpmh_masters[i].master_name, record->version_id,
+					record->counts, record->last_entered,
+					record->last_exited, temp_accumulated_duration);
+		}
+	}
+
+	mutex_unlock(&rpmh_stats_mutex);
+
+	return snprintf(buf, sizeof(stats_buf), "%s", stats_buf);
+}
+
 static int msm_rpmh_master_stats_probe(struct platform_device *pdev)
 {
-	struct rpmh_master_stats_prv_data *prvdata = NULL;
-	struct kobject *rpmh_master_stats_kobj = NULL;
-	int ret = -ENOMEM;
-
-	if (!pdev)
-		return -EINVAL;
-
-	prvdata = devm_kzalloc(&pdev->dev, sizeof(*prvdata), GFP_KERNEL);
-	if (!prvdata)
-		return ret;
-
-	rpmh_master_stats_kobj = kobject_create_and_add(
-					"rpmh_stats",
-					power_kobj);
-	if (!rpmh_master_stats_kobj)
-		return ret;
-
-	prvdata->kobj = rpmh_master_stats_kobj;
-
-	sysfs_attr_init(&prvdata->ka.attr);
-	prvdata->ka.attr.mode = 0444;
-	prvdata->ka.attr.name = "master_stats";
-	prvdata->ka.show = msm_rpmh_master_stats_show;
-	prvdata->ka.store = NULL;
-
-	ret = sysfs_create_file(prvdata->kobj, &prvdata->ka.attr);
-	if (ret) {
-		pr_err("sysfs_create_file failed\n");
-		goto fail_sysfs;
-	}
-
-#ifdef OPLUS_FEATURE_POWERINFO_RPMH
-	prvdata->opluskobj = rpmh_master_stats_kobj;
-
-	sysfs_attr_init(&prvdata-> opluska.attr);
-	prvdata->opluska.attr.mode = 0444;
-	prvdata->opluska.attr.name = "oplus_rpmh_master_stats";
-	prvdata->opluska.show =  oplus_rpmh_master_stats_show;
-	prvdata->opluska.store = NULL;
-
-	ret = sysfs_create_file(prvdata->opluskobj, &prvdata->opluska.attr);
-	if (ret) {
-		pr_err("sysfs_create_file oplus failed\n");
-		goto fail_sysfs_oplus;
-	}
-#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
-
 	rpmh_unit_base = of_iomap(pdev->dev.of_node, 0);
 	if (!rpmh_unit_base) {
 		pr_err("Failed to get rpmh_unit_base\n");
-		ret = -ENOMEM;
-		goto fail_iomap;
+		return -ENOMEM;
 	}
 
 	apss_master_stats.version_id = 0x1;
-	platform_set_drvdata(pdev, prvdata);
-	return ret;
 
-fail_iomap:
-#ifdef OPLUS_FEATURE_POWERINFO_RPMH
-	sysfs_remove_file(prvdata->opluskobj, &prvdata->opluska.attr);
-fail_sysfs_oplus:
-#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
-	sysfs_remove_file(prvdata->kobj, &prvdata->ka.attr);
-fail_sysfs:
-	kobject_put(prvdata->kobj);
-	return ret;
+	return 0;
 }
 
 static int msm_rpmh_master_stats_remove(struct platform_device *pdev)
 {
-	struct rpmh_master_stats_prv_data *prvdata;
-
-	if (!pdev)
-		return -EINVAL;
-
-	prvdata = (struct rpmh_master_stats_prv_data *)
-				platform_get_drvdata(pdev);
-#ifdef OPLUS_FEATURE_POWERINFO_RPMH
-	sysfs_remove_file(prvdata->opluskobj, &prvdata->opluska.attr);
-#endif /* OPLUS_FEATURE_POWERINFO_RPMH */
-	sysfs_remove_file(prvdata->kobj, &prvdata->ka.attr);
-	kobject_put(prvdata->kobj);
-	platform_set_drvdata(pdev, NULL);
 	iounmap(rpmh_unit_base);
-	rpmh_unit_base = NULL;
 
 	return 0;
 }

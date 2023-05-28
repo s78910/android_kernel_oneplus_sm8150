@@ -95,7 +95,6 @@ int sysctl_tcp_min_rtt_wlen __read_mostly = 300;
 int sysctl_tcp_moderate_rcvbuf __read_mostly = 1;
 int sysctl_tcp_early_retrans __read_mostly = 3;
 int sysctl_tcp_invalid_ratelimit __read_mostly = HZ/2;
-int sysctl_tcp_default_init_rwnd __read_mostly = TCP_INIT_CWND * 2;
 
 #define FLAG_DATA		0x01 /* Incoming frame contained data.		*/
 #define FLAG_WIN_UPDATE		0x02 /* Incoming ACK was a window update.	*/
@@ -125,15 +124,6 @@ int sysctl_tcp_default_init_rwnd __read_mostly = TCP_INIT_CWND * 2;
 #define REXMIT_NONE	0 /* no loss recovery to do */
 #define REXMIT_LOST	1 /* retransmit packets marked lost */
 #define REXMIT_NEW	2 /* FRTO-style transmit of unsent/new packets */
-#ifdef OPLUS_FEATURE_MODEM_DATA_NWPOWER
-/*
-*Add for classify glink wakeup services
-*/
-#include <net/oplus_nwpower.h>
-extern atomic_t tcpsynretrans_hook_boot;
-extern struct work_struct oplus_tcp_input_tcpsynretrans_hook_work;
-extern struct oplus_tcp_hook_struct oplus_tcp_input_tcpsynretrans_hook;
-#endif /* OPLUS_FEATURE_MODEM_DATA_NWPOWER */
 
 static void tcp_gro_dev_warn(struct sock *sk, const struct sk_buff *skb,
 			     unsigned int len)
@@ -430,7 +420,7 @@ static void tcp_fixup_rcvbuf(struct sock *sk)
 	int rcvmem;
 
 	rcvmem = 2 * SKB_TRUESIZE(mss + MAX_TCP_HEADER) *
-		 tcp_default_init_rwnd(mss);
+		 tcp_default_init_rwnd(sock_net(sk), mss);
 
 	/* Dynamic Right Sizing (DRS) has 2 to 3 RTT latency
 	 * Allow enough cushion so that sender is not limited by our window
@@ -4517,7 +4507,11 @@ static void tcp_data_queue_ofo(struct sock *sk, struct sk_buff *skb)
 	if (tcp_ooo_try_coalesce(sk, tp->ooo_last_skb,
 				 skb, &fragstolen)) {
 coalesce_done:
-		tcp_grow_window(sk, skb);
+		/* For non sack flows, do not grow window to force DUPACK
+		 * and trigger fast retransmit.
+		 */
+		if (tcp_is_sack(tp))
+			tcp_grow_window(sk, skb);
 		kfree_skb_partial(skb, fragstolen);
 		skb = NULL;
 		goto add_sack;
@@ -4601,7 +4595,11 @@ add_sack:
 		tcp_sack_new_ofo_skb(sk, seq, end_seq);
 end:
 	if (skb) {
-		tcp_grow_window(sk, skb);
+		/* For non sack flows, do not grow window to force DUPACK
+		 * and trigger fast retransmit.
+		 */
+		if (tcp_is_sack(tp))
+			tcp_grow_window(sk, skb);
 		skb_condense(skb);
 		skb_set_owner_r(skb, sk);
 	}
@@ -4680,12 +4678,6 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 	struct tcp_sock *tp = tcp_sk(sk);
 	bool fragstolen;
 	int eaten;
-#ifdef OPLUS_FEATURE_MODEM_DATA_NWPOWER
-	/*
-	*Add for classify glink wakeup services
-	*/
-	struct timespec now_ts;
-#endif /* OPLUS_FEATURE_MODEM_DATA_NWPOWER */
 
 	if (TCP_SKB_CB(skb)->seq == TCP_SKB_CB(skb)->end_seq) {
 		__kfree_skb(skb);
@@ -4744,29 +4736,6 @@ queue_and_out:
 
 	if (!after(TCP_SKB_CB(skb)->end_seq, tp->rcv_nxt)) {
 		/* A retransmit, 2nd most common case.  Force an immediate ack. */
-#ifdef OPLUS_FEATURE_MODEM_DATA_NWPOWER
-		/*
-		*Add for classify glink wakeup services
-		*/
-		if (atomic_read(&tcpsynretrans_hook_boot) == 1) {
-			now_ts = current_kernel_time();
-			if (((now_ts.tv_sec * 1000 + now_ts.tv_nsec / 1000000) - sk->oplus_last_rcv_stamp[0]) > OPLUS_TCP_RETRANSMISSION_INTERVAL) {
-				if (sk->sk_v6_daddr.s6_addr32[0] == 0 && sk->sk_v6_daddr.s6_addr32[1] == 0) {
-					oplus_tcp_input_tcpsynretrans_hook.ipv4_addr = sk->sk_daddr;
-					oplus_tcp_input_tcpsynretrans_hook.is_ipv6 = false;
-					schedule_work(&oplus_tcp_input_tcpsynretrans_hook_work);
-				} else {
-					oplus_tcp_input_tcpsynretrans_hook.ipv6_addr1 = (u64)ntohl(sk->sk_v6_daddr.s6_addr32[0]) << 32 | ntohl(sk->sk_v6_daddr.s6_addr32[1]);
-					oplus_tcp_input_tcpsynretrans_hook.ipv6_addr2 = (u64)ntohl(sk->sk_v6_daddr.s6_addr32[2]) << 32 | ntohl(sk->sk_v6_daddr.s6_addr32[3]);
-					oplus_tcp_input_tcpsynretrans_hook.is_ipv6 = true;
-					schedule_work(&oplus_tcp_input_tcpsynretrans_hook_work);
-				}
-				oplus_tcp_input_tcpsynretrans_hook.uid = get_uid_from_sock(sk);
-				oplus_tcp_input_tcpsynretrans_hook.pid = sk->sk_oplus_pid;
-			}
-		}
-#endif /* OPLUS_FEATURE_MODEM_DATA_NWPOWER */
-
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_DELAYEDACKLOST);
 		tcp_dsack_set(sk, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
 
@@ -5723,16 +5692,6 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 	struct tcp_fastopen_cookie foc = { .len = -1 };
 	int saved_clamp = tp->rx_opt.mss_clamp;
 	bool fastopen_fail;
-        #ifdef OPLUS_BUG_STABILITY
-        static int ts_error_count = 0;
-        int ts_error_threshold = sysctl_tcp_ts_control[0];
-
-        //when network change (frameworks set sysctl_tcp_ts_control[1] = 1), clear ts_error_count
-        if (sysctl_tcp_ts_control[1] == 1) {
-                ts_error_count = 0;
-                sysctl_tcp_ts_control[1] = 0;
-        }
-        #endif /* OPLUS_BUG_STABILITY */
 
 	tcp_parse_options(sock_net(sk), skb, &tp->rx_opt, 0, &foc);
 	if (tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr)
@@ -5756,25 +5715,9 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 			     tcp_time_stamp(tp))) {
 			NET_INC_STATS(sock_net(sk),
 					LINUX_MIB_PAWSACTIVEREJECTED);
-                        #ifdef OPLUS_BUG_STABILITY
-			//if count > threshold, disable TCP Timestamps
-			if (ts_error_threshold > 0) {
-				ts_error_count++;
-				if (ts_error_count >= ts_error_threshold) {
-					sock_net(sk)->ipv4.sysctl_tcp_timestamps = 0;
-					ts_error_count = 0;
-				}
-			}
-			#endif /* OPLUS_BUG_STABILITY */
 			goto reset_and_undo;
 		}
-                #ifdef OPLUS_BUG_STABILITY
-                //if other connection's Timestamp is correct, the network environment may be OK
-                if (tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr &&
-                    ts_error_threshold > 0 && ts_error_count > 0) {
-                    ts_error_count--;
-                }
-                #endif /* OPLUS_BUG_STABILITY */
+
 		/* Now ACK is acceptable.
 		 *
 		 * "If the RST bit is set

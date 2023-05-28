@@ -81,17 +81,8 @@ static void sdhci_dump_state(struct sdhci_host *host)
 		mmc->parent->power.disable_depth);
 }
 
-#ifdef VENDOR_EDIT 
-static int flag = 0;
-#endif
 void sdhci_dumpregs(struct sdhci_host *host)
 {
-#ifdef VENDOR_EDIT 
-	if(!flag)
-		    flag++;
-	else
-		    return;
-#endif
 	MMC_TRACE(host->mmc,
 		"%s: 0x04=0x%08x 0x06=0x%08x 0x0E=0x%08x 0x30=0x%08x 0x34=0x%08x 0x38=0x%08x\n",
 		__func__,
@@ -189,7 +180,7 @@ static void sdhci_set_card_detection(struct sdhci_host *host, bool enable)
 	u32 present;
 
 	if ((host->quirks & SDHCI_QUIRK_BROKEN_CARD_DETECTION) ||
-	    !mmc_card_is_removable(host->mmc))
+	    !mmc_card_is_removable(host->mmc) || mmc_can_gpio_cd(host->mmc))
 		return;
 
 	if (enable) {
@@ -1177,7 +1168,7 @@ static void __sdhci_finish_mrq(struct sdhci_host *host, struct mmc_request *mrq)
 
 	WARN_ON(i >= SDHCI_MAX_MRQS);
 
-	tasklet_schedule(&host->finish_tasklet);
+	tasklet_hi_schedule(&host->finish_tasklet);
 }
 
 static void sdhci_finish_mrq(struct sdhci_host *host, struct mmc_request *mrq)
@@ -1287,16 +1278,6 @@ void sdhci_send_command(struct sdhci_host *host, struct mmc_command *cmd)
 	if ((host->quirks2 & SDHCI_QUIRK2_STOP_WITH_TC) &&
 	    cmd->opcode == MMC_STOP_TRANSMISSION)
 		cmd->flags |= MMC_RSP_BUSY;
-
-#ifdef VENDOR_EDIT
-	if(host->mmc->card_stuck_in_programing_status && ((cmd->opcode == MMC_WRITE_MULTIPLE_BLOCK) || (cmd->opcode == MMC_WRITE_BLOCK)))
-	{
-		printk_once(KERN_INFO "%s:card_stuck_in_programing_status cmd:%d\n", mmc_hostname(host->mmc), cmd->opcode );
-		cmd->error = -EIO;
-		sdhci_finish_mrq(host, cmd->mrq);
-		return;
-	}
-#endif /* VENDOR_EDIT */
 
 	/* Wait max 10 ms */
 	timeout = 10000;

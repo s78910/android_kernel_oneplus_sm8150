@@ -1955,6 +1955,7 @@ static void qcom_glink_notif_reset(void *data)
 	spin_unlock_irqrestore(&glink->idr_lock, flags);
 }
 
+
 static void qcom_glink_cancel_rx_work(struct qcom_glink *glink)
 {
 	struct glink_defer_cmd *dcmd;
@@ -1966,11 +1967,17 @@ static void qcom_glink_cancel_rx_work(struct qcom_glink *glink)
 	list_for_each_entry_safe(dcmd, tmp, &glink->rx_queue, node)
 		kfree(dcmd);
 }
-#ifdef  OPLUS_FEATURE_MODEM_DATA_NWPOWER
-#define GLINK_NATIVE_IRQ_NUM_MAX 10
-#define GLINK_NATIVE_IRQ_NAME_LEN 24
-static char glink_native_irq_names[GLINK_NATIVE_IRQ_NUM_MAX][GLINK_NATIVE_IRQ_NAME_LEN];
-#endif/*VENDOR_EDIT*/
+
+struct g_sub_name {
+	const char *g_name;
+	const char *s_name;
+} sub_name[] = {
+	{"adsp", "glink-adsp"},
+	{"cdsp", "glink-cdsp"},
+	{"slpi", "glink-slpi"},
+	{"modem", "glink-modem"},
+};
+
 struct qcom_glink *qcom_glink_native_probe(struct device *dev,
 					   unsigned long features,
 					   struct qcom_glink_pipe *rx,
@@ -1984,12 +1991,7 @@ struct qcom_glink *qcom_glink_native_probe(struct device *dev,
 	int size;
 	int irq;
 	int ret;
-
-#ifdef OPLUS_FEATURE_MODEM_DATA_NWPOWER
-		static int glink_native_irq_index = 1;
-		char *glink_native_irq_name = glink_native_irq_names[0];
-		snprintf(glink_native_irq_names[0], GLINK_NATIVE_IRQ_NAME_LEN, "glink-native");
-#endif/*VENDOR_EDIT*/
+	int i;
 
 	glink = devm_kzalloc(dev, sizeof(*glink), GFP_KERNEL);
 	if (!glink)
@@ -2051,31 +2053,26 @@ struct qcom_glink *qcom_glink_native_probe(struct device *dev,
 		irqflags = IRQF_TRIGGER_RISING;
 	else
 		irqflags = IRQF_NO_SUSPEND | IRQF_SHARED;
-		
-#ifndef OPLUS_FEATURE_MODEM_DATA_NWPOWER
-	ret = devm_request_irq(dev, irq,
-			       qcom_glink_native_intr,
-			       irqflags,
-			       "glink-native", glink);
-#else
-		if(glink_native_irq_index < GLINK_NATIVE_IRQ_NUM_MAX){
-			snprintf(glink_native_irq_names[glink_native_irq_index], GLINK_NATIVE_IRQ_NAME_LEN, "glink-native-%s", glink->name);
-			glink_native_irq_name = glink_native_irq_names[glink_native_irq_index];
-			glink_native_irq_index++;
-		}
-		ret = devm_request_irq(dev, irq,
-					   qcom_glink_native_intr,
-					   IRQF_NO_SUSPEND | IRQF_SHARED,
-					   glink_native_irq_name, glink);
-		pr_err("qcom_glink_native_probe: def:%s final:%s index:%d irq:%d\n", glink_native_irq_names[0], glink_native_irq_name, glink_native_irq_index,irq);
-#endif/*VENDOR_EDIT*/
 
-	if (ret) {
-		dev_err(dev, "failed to request IRQ\n");
-		goto unregister;
+	for (i = 0; i < ARRAY_SIZE(sub_name); i++) {
+		if (strcmp(sub_name[i].g_name, glink->name) == 0) {
+			ret = devm_request_irq(dev, irq,
+				qcom_glink_native_intr,
+				irqflags,
+				sub_name[i].s_name, glink);
+			if (ret) {
+				dev_err(dev, "failed to request IRQ\n");
+				goto unregister;
+			}
+			break;
+		}
 	}
 
 	glink->irq = irq;
+
+	ret = enable_irq_wake(irq);
+	if (ret < 0)
+		dev_err(dev, "enable_irq_wake() failed on %d\n", irq);
 
 	size = of_property_count_u32_elems(dev->of_node, "cpu-affinity");
 	if (size > 0) {

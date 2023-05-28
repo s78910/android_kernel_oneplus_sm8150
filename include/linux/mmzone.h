@@ -19,9 +19,7 @@
 #include <linux/page-flags-layout.h>
 #include <linux/atomic.h>
 #include <asm/page.h>
-#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
-#include <linux/multi_kswapd.h>
-#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
+
 /* Free memory management - zoned buddy allocator.  */
 #ifndef CONFIG_FORCE_MAX_ZONEORDER
 #define MAX_ORDER 11
@@ -30,9 +28,6 @@
 #endif
 #define MAX_ORDER_NR_PAGES (1 << (MAX_ORDER - 1))
 
-#if defined(OPLUS_FEATURE_MULTI_FREEAREA) && defined(CONFIG_PHYSICAL_ANTI_FRAGMENTATION)
-#define FREE_AREA_COUNTS 4
-#endif
 /*
  * PAGE_ALLOC_COSTLY_ORDER is the order at which allocations are deemed
  * costly to service.  That is between allocation orders which should
@@ -63,6 +58,9 @@ enum migratetype {
 #endif
 	MIGRATE_PCPTYPES, /* the number of types on the pcp lists */
 	MIGRATE_HIGHATOMIC = MIGRATE_PCPTYPES,
+#ifdef CONFIG_DEFRAG
+	MIGRATE_UNMOVABLE_DEFRAG_POOL,
+#endif
 #ifdef CONFIG_MEMORY_ISOLATION
 	MIGRATE_ISOLATE,	/* can't allocate from here */
 #endif
@@ -144,6 +142,10 @@ enum zone_stat_item {
 	NR_ZONE_ACTIVE_ANON,
 	NR_ZONE_INACTIVE_FILE,
 	NR_ZONE_ACTIVE_FILE,
+#ifdef CONFIG_MEMPLUS
+	NR_ZONE_INACTIVE_ANON_SWAPCACHE,
+	NR_ZONE_ACTIVE_ANON_SWAPCACHE,
+#endif
 	NR_ZONE_UNEVICTABLE,
 	NR_ZONE_WRITE_PENDING,	/* Count of dirty, writeback and unstable pages */
 	NR_MLOCK,		/* mlock()ed pages found and moved off LRU */
@@ -157,10 +159,16 @@ enum zone_stat_item {
 #if IS_ENABLED(CONFIG_ZSMALLOC)
 	NR_ZSPAGES,		/* allocated in zsmalloc */
 #endif
+#ifdef CONFIG_SMART_BOOST
+	NR_ZONE_UID_LRU,
+#endif
+#ifdef CONFIG_ONEPLUS_HEALTHINFO
+	NR_IONCACHE_PAGES,
+#endif
 	NR_FREE_CMA_PAGES,
-#ifdef OPLUS_FEATURE_HEALTHINFO
-        NR_IONCACHE_PAGES,
-#endif /* OPLUS_FEATURE_HEALTHINFO */
+#ifdef CONFIG_DEFRAG
+	NR_FREE_DEFRAG_POOL,
+#endif
 	NR_VM_ZONE_STAT_ITEMS };
 
 enum node_stat_item {
@@ -169,6 +177,10 @@ enum node_stat_item {
 	NR_ACTIVE_ANON,		/*  "     "     "   "       "         */
 	NR_INACTIVE_FILE,	/*  "     "     "   "       "         */
 	NR_ACTIVE_FILE,		/*  "     "     "   "       "         */
+#ifdef CONFIG_MEMPLUS
+	NR_INACTIVE_ANON_SWAPCACHE,	/*  "     "     "   "       "         */
+	NR_ACTIVE_ANON_SWAPCACHE,	/*  "     "     "   "       "         */
+#endif
 	NR_UNEVICTABLE,		/*  "     "     "   "       "         */
 	NR_SLAB_RECLAIMABLE,
 	NR_SLAB_UNRECLAIMABLE,
@@ -217,13 +229,22 @@ enum lru_list {
 	LRU_ACTIVE_ANON = LRU_BASE + LRU_ACTIVE,
 	LRU_INACTIVE_FILE = LRU_BASE + LRU_FILE,
 	LRU_ACTIVE_FILE = LRU_BASE + LRU_FILE + LRU_ACTIVE,
+#ifdef CONFIG_MEMPLUS
+	LRU_INACTIVE_ANON_SWPCACHE,
+	LRU_ACTIVE_ANON_SWPCACHE,
+#endif
 	LRU_UNEVICTABLE,
 	NR_LRU_LISTS
 };
 
 #define for_each_lru(lru) for (lru = 0; lru < NR_LRU_LISTS; lru++)
 
+#ifdef CONFIG_MEMPLUS
+#define for_each_evictable_lru(lru)	\
+	for (lru = 0; lru <= LRU_ACTIVE_ANON_SWPCACHE; lru++)
+#else
 #define for_each_evictable_lru(lru) for (lru = 0; lru <= LRU_ACTIVE_FILE; lru++)
+#endif
 
 static inline int is_file_lru(enum lru_list lru)
 {
@@ -232,7 +253,13 @@ static inline int is_file_lru(enum lru_list lru)
 
 static inline int is_active_lru(enum lru_list lru)
 {
+#ifdef CONFIG_MEMPLUS
+	return (lru == LRU_ACTIVE_ANON ||
+		lru == LRU_ACTIVE_FILE || lru == LRU_ACTIVE_ANON_SWPCACHE);
+#else
 	return (lru == LRU_ACTIVE_ANON || lru == LRU_ACTIVE_FILE);
+#endif
+
 }
 
 struct zone_reclaim_stat {
@@ -248,6 +275,16 @@ struct zone_reclaim_stat {
 	unsigned long		recent_scanned[2];
 };
 
+#ifdef CONFIG_SMART_BOOST
+struct uid_node {
+	struct uid_node __rcu *next;
+	uid_t uid;
+	unsigned int hot_count;
+	struct list_head  page_cache_list;
+	struct rcu_head rcu;
+};
+#endif
+
 struct lruvec {
 	struct list_head		lists[NR_LRU_LISTS];
 	struct zone_reclaim_stat	reclaim_stat;
@@ -258,11 +295,22 @@ struct lruvec {
 #ifdef CONFIG_MEMCG
 	struct pglist_data *pgdat;
 #endif
+#ifdef CONFIG_SMART_BOOST
+	struct uid_node **uid_hash;
+#endif
+
 };
 
 /* Mask used at gathering information at once (see memcontrol.c) */
 #define LRU_ALL_FILE (BIT(LRU_INACTIVE_FILE) | BIT(LRU_ACTIVE_FILE))
+#ifdef CONFIG_MEMPLUS
+#define LRU_ALL_ANON (BIT(LRU_INACTIVE_ANON) |	\
+	BIT(LRU_ACTIVE_ANON) |	\
+	BIT(LRU_INACTIVE_ANON_SWPCACHE) |	\
+	BIT(LRU_ACTIVE_ANON_SWPCACHE))
+#else
 #define LRU_ALL_ANON (BIT(LRU_INACTIVE_ANON) | BIT(LRU_ACTIVE_ANON))
+#endif
 #define LRU_ALL	     ((1 << NR_LRU_LISTS) - 1)
 
 /* Isolate unmapped file */
@@ -371,14 +419,6 @@ enum zone_type {
 
 #ifndef __GENERATING_BOUNDS_H
 
-#if defined(OPLUS_FEATURE_MULTI_FREEAREA) && defined(CONFIG_PHYSICAL_ANTI_FRAGMENTATION)
-struct page_label {
-    unsigned long label;
-    unsigned long segment;
-};
-#endif
-
-
 struct zone {
 	/* Read-mostly fields */
 
@@ -463,9 +503,7 @@ struct zone {
 	unsigned long		managed_pages;
 	unsigned long		spanned_pages;
 	unsigned long		present_pages;
-#if defined(OPLUS_FEATURE_MULTI_FREEAREA) && defined(CONFIG_PHYSICAL_ANTI_FRAGMENTATION)
-    struct page_label zone_label[FREE_AREA_COUNTS];
-#endif
+
 	const char		*name;
 
 #ifdef CONFIG_MEMORY_ISOLATION
@@ -488,11 +526,7 @@ struct zone {
 	ZONE_PADDING(_pad1_)
 
 	/* free areas of different sizes */
-#if defined(OPLUS_FEATURE_MULTI_FREEAREA) && defined(CONFIG_PHYSICAL_ANTI_FRAGMENTATION)
-	struct free_area	free_area[FREE_AREA_COUNTS][MAX_ORDER];
-#else
 	struct free_area	free_area[MAX_ORDER];
-#endif
 
 	/* zone flags, see below */
 	unsigned long		flags;
@@ -687,12 +721,8 @@ typedef struct pglist_data {
 	int node_id;
 	wait_queue_head_t kswapd_wait;
 	wait_queue_head_t pfmemalloc_wait;
-#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
-	struct task_struct *kswapd[MAX_KSWAPD_THREADS];
-#else
 	struct task_struct *kswapd;	/* Protected by
 					   mem_hotplug_begin/end() */
-#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
 	int kswapd_order;
 	enum zone_type kswapd_classzone_idx;
 

@@ -301,64 +301,65 @@ VL53L1_Error VL53L1_data_init(
 
 
 
-	status =
-		VL53L1_init_refspadchar_config_struct(
+    if (status == VL53L1_ERROR_NONE)
+        status = VL53L1_init_refspadchar_config_struct(
 			&(pdev->refspadchar));
 
 
 
-	status =
-		VL53L1_init_ssc_config_struct(
+    if (status == VL53L1_ERROR_NONE)
+        status = VL53L1_init_ssc_config_struct(
 			&(pdev->ssc_cfg));
 
 
 
 
 
-	status =
-		VL53L1_init_xtalk_config_struct(
+    if (status == VL53L1_ERROR_NONE)
+        status = VL53L1_init_xtalk_config_struct(
 			&(pdev->customer),
 			&(pdev->xtalk_cfg));
 
 
 
 
-	status =
-		VL53L1_init_xtalk_extract_config_struct(
+    if (status == VL53L1_ERROR_NONE)
+        status = VL53L1_init_xtalk_extract_config_struct(
 			&(pdev->xtalk_extract_cfg));
 
 
 
 
-	status =
-		VL53L1_init_offset_cal_config_struct(
+    if (status == VL53L1_ERROR_NONE)
+        status = VL53L1_init_offset_cal_config_struct(
 		    &(pdev->offsetcal_cfg));
 
 
 
 
-	status = VL53L1_init_zone_cal_config_struct(
+    if (status == VL53L1_ERROR_NONE)
+        status = VL53L1_init_zone_cal_config_struct(
 			&(pdev->zonecal_cfg));
 
 
 
-	status =
-		VL53L1_init_hist_post_process_config_struct(
+    if (status == VL53L1_ERROR_NONE)
+        status = VL53L1_init_hist_post_process_config_struct(
 			pdev->xtalk_cfg.global_crosstalk_compensation_enable,
 			&(pdev->histpostprocess));
 
 
 
-	status =
-		VL53L1_init_hist_gen3_dmax_config_struct(
+    if (status == VL53L1_ERROR_NONE)
+        status = VL53L1_init_hist_gen3_dmax_config_struct(
 			&(pdev->dmax_cfg));
 
 
 
 
 
-	status =
-		VL53L1_init_tuning_parm_storage_struct(
+    if (status == VL53L1_ERROR_NONE)
+        status = VL53L1_init_tuning_parm_storage_struct(
 			&(pdev->tuning_parms));
 
 
@@ -4115,10 +4116,15 @@ VL53L1_Error VL53L1_get_device_results(
 		break;
 
 		}
-		#if 0
+
+
+
+
+
+
 		if (status != VL53L1_ERROR_NONE)
 			goto UPDATE_DYNAMIC_CONFIG;
-		#endif
+
 
 		VL53L1_calc_max_effective_spads(
 		pHD->roi_config__user_roi_centre_spad,
@@ -4228,10 +4234,11 @@ VL53L1_Error VL53L1_get_device_results(
 
 
 
-		/*
+
+
 		if (status != VL53L1_ERROR_NONE)
 			goto UPDATE_DYNAMIC_CONFIG;
-		*/
+
 		VL53L1_hist_copy_results_to_sys_and_core(
 				&(pdev->hist_data),
 				presults,

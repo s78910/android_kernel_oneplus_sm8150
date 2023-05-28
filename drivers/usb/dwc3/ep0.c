@@ -35,6 +35,22 @@
 #include "debug.h"
 #include "gadget.h"
 #include "io.h"
+#include <linux/power/oem_external_fg.h>
+
+static struct notify_usb_enumeration_status
+		*usb_enumeration_status = NULL;
+
+void regsister_notify_usb_enumeration_status(
+	struct notify_usb_enumeration_status *status)
+{
+	if (usb_enumeration_status) {
+		usb_enumeration_status = status;
+		pr_err("multiple usb_enumeration_status called\n");
+	} else {
+		usb_enumeration_status = status;
+	}
+}
+EXPORT_SYMBOL(regsister_notify_usb_enumeration_status);
 
 static bool enable_dwc3_u1u2;
 module_param(enable_dwc3_u1u2, bool, 0644);
@@ -408,9 +424,7 @@ static int dwc3_ep0_handle_status(struct dwc3 *dwc,
 	dwc->ep0_usb_req.request.length = sizeof(*response_pkt);
 	dwc->ep0_usb_req.request.buf = dwc->setup_buf;
 	dwc->ep0_usb_req.request.complete = dwc3_ep0_status_cmpl;
-#ifdef OPLUS_FEATURE_CHG_BASIC
-    dwc->ep0_usb_req.request.dma = DMA_ERROR_CODE;
-#endif
+
 	return __dwc3_gadget_ep0_queue(dep, &dwc->ep0_usb_req);
 }
 
@@ -867,9 +881,7 @@ static int dwc3_ep0_set_sel(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 	dwc->ep0_usb_req.request.length = dep->endpoint.maxpacket;
 	dwc->ep0_usb_req.request.buf = dwc->setup_buf;
 	dwc->ep0_usb_req.request.complete = dwc3_ep0_set_sel_cmpl;
-#ifdef OPLUS_FEATURE_CHG_BASIC
-	dwc->ep0_usb_req.request.dma = DMA_ERROR_CODE;
-#endif
+
 	return __dwc3_gadget_ep0_queue(dep, &dwc->ep0_usb_req);
 }
 
@@ -910,6 +922,10 @@ static int dwc3_ep0_std_request(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 		ret = dwc3_ep0_handle_feature(dwc, ctrl, 1);
 		break;
 	case USB_REQ_SET_ADDRESS:
+		if (usb_enumeration_status
+			&& usb_enumeration_status->notify_usb_enumeration) {
+			usb_enumeration_status->notify_usb_enumeration(true);
+		}
 		ret = dwc3_ep0_set_address(dwc, ctrl);
 		break;
 	case USB_REQ_SET_CONFIGURATION:

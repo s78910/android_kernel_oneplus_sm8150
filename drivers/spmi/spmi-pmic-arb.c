@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018, 2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -514,7 +514,7 @@ static void periph_interrupt(struct spmi_pmic_arb *pmic_arb, u16 apid)
 		id = ffs(status) - 1;
 		status &= ~BIT(id);
 		irq = irq_find_mapping(pmic_arb->domain,
-					spec_to_hwirq(sid, per, id, apid));
+					(unsigned int)spec_to_hwirq(sid, per, id, apid));
 		if (irq == 0) {
 			cleanup_irq(pmic_arb, apid, id);
 			continue;
@@ -783,6 +783,8 @@ static int qpnpint_irq_domain_dt_translate(struct irq_domain *d,
 	return 0;
 }
 
+static struct lock_class_key qpnpint_irq_lock_class;
+
 static int qpnpint_irq_domain_map(struct irq_domain *d,
 				  unsigned int virq,
 				  irq_hw_number_t hwirq)
@@ -791,6 +793,7 @@ static int qpnpint_irq_domain_map(struct irq_domain *d,
 
 	dev_dbg(&pmic_arb->spmic->dev, "virq = %u, hwirq = %lu\n", virq, hwirq);
 
+	irq_set_lockdep_class(virq, &qpnpint_irq_lock_class);
 	irq_set_chip_and_handler(virq, &pmic_arb_irqchip, handle_level_irq);
 	irq_set_chip_data(virq, d->host_data);
 	irq_set_noprobe(virq);

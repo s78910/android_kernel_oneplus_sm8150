@@ -105,11 +105,7 @@ source "drivers/usb/Kconfig"
 
 source "drivers/uwb/Kconfig"
 
-#ifdef VENDOR_EDIT
-source "drivers/ommc/Kconfig"
-#else
-#source "drivers/mmc/Kconfig"
-#endif
+source "drivers/mmc/Kconfig"
 
 source "drivers/memstick/Kconfig"
 
@@ -217,6 +213,8 @@ source "drivers/hwtracing/stm/Kconfig"
 
 source "drivers/hwtracing/intel_th/Kconfig"
 
+source "drivers/hwtracing/google/Kconfig"
+
 source "drivers/fpga/Kconfig"
 
 source "drivers/fsi/Kconfig"
@@ -229,11 +227,15 @@ source "drivers/sensors/Kconfig"
 
 source "drivers/esoc/Kconfig"
 
-source "drivers/infrared_proximity/Kconfig"
+source "drivers/oneplus/Kconfig"
 
-#ifdef OPLUS_NFC_BRINGUP
-#Add for the kernel Macro for NXP PN557 NFC kernel
-source "drivers/nfc/pn553-i2c/Kconfig"
-source "drivers/nfc/p73-spi/Kconfig"
-#endif /*OPLUS_NFC_BRINGUP*/
+source "drivers/param_read_write/Kconfig"
+
+source "drivers/step_motor/Kconfig"
+
+source "drivers/tri_state_key/Kconfig"
+
+source "drivers/oem_debug/Kconfig"
+source "drivers/vibrator/Kconfig"
+source "drivers/vm_fragment_monitor/Kconfig"
 endmenu

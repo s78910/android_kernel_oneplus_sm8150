@@ -30,13 +30,9 @@
 #include "walt.h"
 
 #include <trace/events/sched.h>
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-#include <linux/sched.h>
-#include <linux/sched_assist/sched_assist_common.h>
-extern u64 ux_task_load[];
-extern u64 ux_load_ts[];
-#define UX_LOAD_WINDOW 8000000
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#ifdef CONFIG_IM
+#include <linux/oem/im.h>
+#endif
 
 const char *task_event_names[] = {"PUT_PREV_TASK", "PICK_NEXT_TASK",
 				  "TASK_WAKE", "TASK_MIGRATE", "TASK_UPDATE",
@@ -522,11 +518,7 @@ u64 freq_policy_load(struct rq *rq)
 	u64 aggr_grp_load = cluster->aggr_grp_load;
 	u64 load, tt_load = 0;
 	u64 coloc_boost_load = cluster->coloc_boost_load;
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-	u64 wallclock = sched_ktime_clock();
-	u64 timeline = 0;
-	int cpu = cpu_of(rq);
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+
 	if (rq->ed_task != NULL) {
 		load = sched_ravg_window;
 		goto done;
@@ -553,14 +545,6 @@ u64 freq_policy_load(struct rq *rq)
 	default:
 		break;
 	}
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-	if (sched_assist_scene(SA_SLIDE) && ux_load_ts[cpu]) {
-		timeline = wallclock - ux_load_ts[cpu];
-		if  (timeline >= UX_LOAD_WINDOW)
-			ux_task_load[cpu] = 0;
-		load = max_t(u64, load, ux_task_load[cpu]);
-	}
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
 
 done:
 	trace_sched_load_to_gov(rq, aggr_grp_load, tt_load, sched_freq_aggr_en,
@@ -793,24 +777,6 @@ migrate_top_tasks(struct task_struct *p, struct rq *src_rq, struct rq *dst_rq)
 	}
 }
 
-#ifdef OPLUS_FEATURE_EDTASK_IMPROVE
-void migrate_ed_task(struct task_struct *p, u64 wallclock,
-		struct rq *src_rq, struct rq *dest_rq)
-{
-	int src_cpu = cpu_of(src_rq);
-	int dest_cpu = cpu_of(dest_rq);
-
-	/* For ed task, reset last_wake_ts if task migrate to faster cpu */
-	if (capacity_orig_of(src_cpu) < capacity_orig_of(dest_cpu)) {
-		p->last_wake_ts = wallclock;
-		if(dest_rq->ed_task == p) {
-			dest_rq->ed_task = NULL;
-		}
-	}
-}
-extern int sysctl_ed_task_enabled;
-#endif
-
 void fixup_busy_time(struct task_struct *p, int new_cpu)
 {
 	struct rq *src_rq = task_rq(p);
@@ -928,12 +894,6 @@ void fixup_busy_time(struct task_struct *p, int new_cpu)
 			dest_rq->ed_task = p;
 		}
 	}
-
-#ifdef OPLUS_FEATURE_EDTASK_IMPROVE
-	if (sysctl_ed_task_enabled) {
-		migrate_ed_task(p, wallclock, src_rq, dest_rq);
-	}
-#endif
 
 done:
 	if (p->state == TASK_WAKING)
@@ -1820,6 +1780,11 @@ done:
 
 static u64 add_to_task_demand(struct rq *rq, struct task_struct *p, u64 delta)
 {
+	if (p->compensate_need == 1) {
+		delta += p->compensate_time;
+		p->compensate_time = 0;
+		p->compensate_need = 0;
+	}
 	delta = scale_exec_time(delta, rq);
 	p->ravg.sum += delta;
 	if (unlikely(p->ravg.sum > sched_ravg_window))
@@ -2205,6 +2170,14 @@ static struct sched_cluster *alloc_new_cluster(const struct cpumask *cpus)
 	raw_spin_lock_init(&cluster->load_lock);
 	cluster->cpus = *cpus;
 	cluster->efficiency = topology_get_cpu_efficiency(cpumask_first(cpus));
+#ifdef CONFIG_ONEPLUS_HEALTHINFO
+	// 2020-05-01,Add for cpu overload statistic
+	cluster->overload = kzalloc(sizeof(struct sched_stat_para), GFP_ATOMIC);
+	cluster->overload->low_thresh_ms = 100;
+	cluster->overload->high_thresh_ms = 500;
+	if (!cluster->overload)
+		return NULL;
+#endif
 
 	if (cluster->efficiency > max_possible_efficiency)
 		max_possible_efficiency = cluster->efficiency;
@@ -2694,7 +2667,7 @@ int update_preferred_cluster(struct related_thread_group *grp,
 {
 	u32 new_load = task_load(p);
 
-	if (!grp)
+	if (!grp || !p->grp)
 		return 0;
 
 	/*
@@ -2715,8 +2688,6 @@ DEFINE_MUTEX(policy_mutex);
 
 #define ADD_TASK	0
 #define REM_TASK	1
-
-#define DEFAULT_CGROUP_COLOC_ID 1
 
 static inline struct related_thread_group*
 lookup_related_thread_group(unsigned int group_id)
@@ -2823,6 +2794,14 @@ void add_new_task_to_grp(struct task_struct *new)
 	unsigned long flags;
 	struct related_thread_group *grp;
 
+#ifdef CONFIG_IM
+	if (im_sf(new)) {
+		// add child of sf into rdg
+		if (!im_render_grouping_enable())
+			im_list_add_task(new);
+	}
+#endif
+
 	/*
 	 * If the task does not belong to colocated schedtune
 	 * cgroup, nothing to do. We are checking this without
@@ -2893,7 +2872,10 @@ int sched_set_group_id(struct task_struct *p, unsigned int group_id)
 {
 	/* DEFAULT_CGROUP_COLOC_ID is a reserved id */
 	if (group_id == DEFAULT_CGROUP_COLOC_ID)
-		return -EINVAL;
+#ifdef CONFIG_IM
+		if (!im_rendering(p))
+#endif
+			return -EINVAL;
 
 	return __sched_set_group_id(p, group_id);
 }
@@ -2941,6 +2923,12 @@ late_initcall(create_default_coloc_group);
 int sync_cgroup_colocation(struct task_struct *p, bool insert)
 {
 	unsigned int grp_id = insert ? DEFAULT_CGROUP_COLOC_ID : 0;
+#ifdef CONFIG_IM
+		if (im_sf(p)) {
+			// bypass surfaceflinger to be group 0
+			return 0;
+		}
+#endif
 
 	return __sched_set_group_id(p, grp_id);
 }
@@ -3459,3 +3447,62 @@ void walt_sched_init_rq(struct rq *rq)
 	rq->cum_window_demand_scaled = 0;
 	rq->notif_pending = false;
 }
+
+#ifdef CONFIG_IM
+int group_show(struct seq_file *m, void *v)
+{
+	struct related_thread_group *grp;
+	unsigned long flags;
+	struct task_struct *p;
+	u64 total_demand = 0;
+	u64 render_demand = 0;
+
+	if (!im_render_grouping_enable())
+		return 0;
+
+	grp = lookup_related_thread_group(DEFAULT_CGROUP_COLOC_ID);
+
+	raw_spin_lock_irqsave(&grp->lock, flags);
+	if (list_empty(&grp->tasks)) {
+		raw_spin_unlock_irqrestore(&grp->lock, flags);
+		return 0;
+	}
+
+	list_for_each_entry(p, &grp->tasks, grp_list) {
+
+		total_demand += p->ravg.demand_scaled;
+
+		if (!im_rendering(p))
+			continue;
+
+		seq_printf(m, "%u, %lu, %d\n", p->pid, p->ravg.demand_scaled, p->cpu);
+		render_demand += p->ravg.demand_scaled;
+	}
+
+	seq_printf(m, "total: %u / render: %u\n", total_demand, render_demand);
+
+	raw_spin_unlock_irqrestore(&grp->lock, flags);
+	return 0;
+}
+
+void group_remove(void)
+{
+	struct related_thread_group *grp;
+	struct task_struct *p, *next;
+
+	if (!im_render_grouping_enable())
+		return;
+
+	grp = lookup_related_thread_group(DEFAULT_CGROUP_COLOC_ID);
+
+	if (list_empty(&grp->tasks))
+		return;
+
+	list_for_each_entry_safe(p, next, &grp->tasks, grp_list) {
+		if (im_sf(p))
+			sched_set_group_id(p, 0);
+	}
+}
+
+#endif
+

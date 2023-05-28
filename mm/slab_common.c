@@ -980,15 +980,6 @@ struct kmem_cache *kmalloc_slab(size_t size, gfp_t flags)
 		index = fls(size - 1);
 	}
 
-#if defined(OPLUS_FEATURE_MEMLEAK_DETECT) && defined(CONFIG_KMALLOC_DEBUG)
-	if (unlikely(kmalloc_debug_enable)) {
-		struct kmem_cache *s;
-
-		s = (struct kmem_cache *)atomic64_read(&kmalloc_debug_caches[kmalloc_type(flags)][index]);
-		if (unlikely(s))
-			return s;
-	}
-#endif
 	return kmalloc_caches[kmalloc_type(flags)][index];
 }
 
@@ -1089,14 +1080,9 @@ new_kmalloc_cache(int idx, int type, unsigned long flags)
 	} else {
 		name = kmalloc_info[idx].name;
 	}
-#if defined(CONFIG_OPLUS_FEATURE_SLABTRACE_DEBUG)
-	kmalloc_caches[type][idx] = create_kmalloc_cache(name,
-					kmalloc_info[idx].size, flags|SLAB_STORE_USER);
 
-#else
 	kmalloc_caches[type][idx] = create_kmalloc_cache(name,
 					kmalloc_info[idx].size, flags);
-#endif
 }
 
 /*
@@ -1249,10 +1235,9 @@ static void print_slabinfo_header(struct seq_file *m)
 	seq_puts(m, " : globalstat <listallocs> <maxobjs> <grown> <reaped> <error> <maxfreeable> <nodeallocs> <remotefrees> <alienoverflow>");
 	seq_puts(m, " : cpustat <allochit> <allocmiss> <freehit> <freemiss>");
 #endif
-#ifdef OPLUS_FEATURE_HEALTHINFO
+#ifdef CONFIG_SLAB_STAT_DEBUG
 	seq_puts(m, " <reclaim>");
-
-#endif /* OPLUS_FEATURE_HEALTHINFO */
+#endif
 	seq_putc(m, '\n');
 }
 
@@ -1308,14 +1293,11 @@ static void cache_show(struct kmem_cache *s, struct seq_file *m)
 
 	seq_printf(m, " : tunables %4u %4u %4u",
 		   sinfo.limit, sinfo.batchcount, sinfo.shared);
-#ifndef OPLUS_FEATURE_HEALTHINFO
-	seq_printf(m, " : slabdata %6lu %6lu %6lu",
-		   sinfo.active_slabs, sinfo.num_slabs, sinfo.shared_avail);
-#else /* OPLUS_FEATURE_HEALTHINFO */
+#ifdef CONFIG_SLAB_STAT_DEBUG
 	seq_printf(m, " : slabdata %6lu %6lu %6lu %1d",
-			   sinfo.active_slabs, sinfo.num_slabs, sinfo.shared_avail,
-			   ((s->flags & SLAB_RECLAIM_ACCOUNT) == SLAB_RECLAIM_ACCOUNT) ? 1: 0);
-#endif /* OPLUS_FEATURE_HEALTHINFO */
+				sinfo.active_slabs, sinfo.num_slabs, sinfo.shared_avail,
+				((s->flags & SLAB_RECLAIM_ACCOUNT) == SLAB_RECLAIM_ACCOUNT) ? 1 : 0);
+#endif
 	slabinfo_show_stats(m, s);
 	seq_putc(m, '\n');
 }
@@ -1494,7 +1476,7 @@ void kzfree(const void *p)
 	if (unlikely(ZERO_OR_NULL_PTR(mem)))
 		return;
 	ks = ksize(mem);
-	memset(mem, 0, ks);
+	memzero_explicit(mem, ks);
 	kfree(mem);
 }
 EXPORT_SYMBOL(kzfree);

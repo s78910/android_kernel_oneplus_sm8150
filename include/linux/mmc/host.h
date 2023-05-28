@@ -25,13 +25,6 @@
 
 #define MMC_AUTOSUSPEND_DELAY_MS	3000
 
-#ifdef VENDOR_EDIT
-#define MAX_MULTIREAD_TIMEOUT_ERR_CNT 10
-#define MMC_MULTIREAD_CNT_WINDOW_S   (150)
-#define MAX_MULTIWRITE_TIMEOUT_ERR_CNT 10
-#define MMC_MULTIWRITE_CNT_WINDOW_S   (300)
-#endif /* VENDOR_EDIT */
-
 struct mmc_ios {
 	unsigned int	clock;			/* clock rate */
 	unsigned int	old_rate;       /* saved clock rate */
@@ -516,6 +509,7 @@ struct mmc_host {
 	u32			cached_caps2;
 
 #define MMC_CAP2_BOOTPART_NOACC (1 << 0)        /* Boot partition no access */
+#define MMC_CAP2_CRYPTO		(1 << 1)	/* Host supports inline encryption */
 #define MMC_CAP2_FULL_PWR_CYCLE (1 << 2)        /* Can do full power cycle */
 #define MMC_CAP2_HS200_1_8V_SDR (1 << 5)        /* can support */
 #define MMC_CAP2_HS200_1_2V_SDR (1 << 6)        /* can support */
@@ -610,9 +604,6 @@ struct mmc_host {
 
 	struct delayed_work	detect;
 	int			detect_change;	/* card detect flag */
-#ifdef VENDOR_EDIT
-    int detect_change_retry;
-#endif /* VENDOR_EDIT */
 	struct mmc_slot		slot;
 
 	const struct mmc_bus_ops *bus_ops;	/* current bus driver */
@@ -629,10 +620,6 @@ struct mmc_host {
 	bool			sdio_irq_pending;
 	atomic_t		sdio_irq_thread_abort;
 
-#ifdef VENDOR_EDIT
-        bool                    card_stuck_in_programing_status;
-#endif /* VENDOR_EDIT */
-
 	mmc_pm_flag_t		pm_flags;	/* requested pm features */
 
 	struct led_trigger	*led;		/* activity led */
@@ -643,19 +630,6 @@ struct mmc_host {
 	struct mmc_supply	supply;
 
 	struct dentry		*debugfs_root;
-
-#ifdef VENDOR_EDIT
-	unsigned int	card_multiread_timeout_err_cnt;
-	sector_t	old_blk_rq_rd_pos;
-	bool		card_first_rd_timeout;
-	unsigned long	card_rd_timeout_start;
-	bool		card_is_rd_abnormal;
-	unsigned int	card_multiwrite_timeout_err_cnt;
-	sector_t	old_blk_rq_wr_pos;
-	bool		card_first_wr_timeout;
-	unsigned long	card_wr_timeout_start;
-	bool		card_is_wr_abnormal;
-#endif /* VENDOR_EDIT */
 
 	bool			err_occurred;
 	u32			err_stats[MMC_ERR_MAX];
@@ -698,6 +672,10 @@ struct mmc_host {
 	int			cqe_qdepth;
 	bool			cqe_enabled;
 	bool			cqe_on;
+#ifdef CONFIG_MMC_CRYPTO
+	struct keyslot_manager	*ksm;
+	void *crypto_DO_NOT_USE[7];
+#endif /* CONFIG_MMC_CRYPTO */
 
 #ifdef CONFIG_MMC_EMBEDDED_SDIO
 	struct {

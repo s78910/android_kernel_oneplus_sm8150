@@ -22,6 +22,7 @@
 #include "dsi_drm.h"
 #include "sde_trace.h"
 #include "sde_encoder.h"
+#include "sde_dbg.h"
 
 #define to_dsi_bridge(x)     container_of((x), struct dsi_bridge, base)
 #define to_dsi_state(x)      container_of((x), struct dsi_connector_state, base)
@@ -412,10 +413,7 @@ static bool dsi_bridge_mode_fixup(struct drm_bridge *bridge,
 		if (rc) {
 			pr_err("[%s] seamless mode mismatch failure rc=%d\n",
 				c_bridge->display->name, rc);
-		/*
-		 *note: orignal change was abandoned here due to compatibility
-		 */
-			return false;
+//			return false;
 		}
 
 		drm_for_each_encoder(encoder, crtc_state->crtc->dev) {
@@ -443,23 +441,6 @@ static bool dsi_bridge_mode_fixup(struct drm_bridge *bridge,
 			(!crtc_state->active_changed ||
 			 display->is_cont_splash_enabled))
 			dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_DMS;
-
-#ifdef OPLUS_BUG_STABILITY
-        if (display->is_cont_splash_enabled)
-            dsi_mode.dsi_mode_flags &= ~DSI_MODE_FLAG_DMS;
-
-#ifdef OPLUS_FEATURE_AOD_RAMLESS
-		if (display->panel && display->panel->oplus_priv.is_aod_ramless) {
-			if (crtc_state->active_changed && (dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_DYN_CLK)) {
-				DSI_ERR("dyn clk changed when active_changed, WA to skip dyn clk change\n");
-				dsi_mode.dsi_mode_flags &= ~DSI_MODE_FLAG_DYN_CLK;
-			}
-
-			if (dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_DMS)
-				dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_SEAMLESS;
-		}
-#endif /* OPLUS_FEATURE_AOD_RAMLESS */
-#endif /* OPLUS_BUG_STABILITY */
 
 		/* Reject seemless transition when active/connectors changed.*/
 		if ((crtc_state->active_changed ||
@@ -522,7 +503,7 @@ int dsi_conn_get_mode_info(struct drm_connector *connector,
 
 	if (!dsi_mode.priv_info)
 		return -EINVAL;
-
+	SDE_EVT32(mode_info,  ((unsigned long long)mode_info) >> 32, connector, ((unsigned long long)connector) >> 32, 0x9999);
 	memset(mode_info, 0, sizeof(*mode_info));
 
 	timing = &dsi_mode.timing;
@@ -552,7 +533,7 @@ int dsi_conn_get_mode_info(struct drm_connector *connector,
 		memcpy(&mode_info->roi_caps, &dsi_mode.priv_info->roi_caps,
 			sizeof(dsi_mode.priv_info->roi_caps));
 	}
-
+	SDE_EVT32(dsi_mode.priv_info->dsc_enabled, mode_info->clk_rate, mode_info->frame_rate, 0x9999);
 	return 0;
 }
 

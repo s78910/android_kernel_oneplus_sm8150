@@ -30,6 +30,7 @@
 #include <linux/slab.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
+#include <linux/miscdevice.h>
 #include <soc/qcom/boot_stats.h>
 #include <linux/dma-mapping.h>
 
@@ -121,9 +122,9 @@
 #define WAIT_XFER_MAX_ITER	(2)
 #define WAIT_XFER_MAX_TIMEOUT_US	(10000)
 #define WAIT_XFER_MIN_TIMEOUT_US	(9000)
-#define IPC_LOG_PWR_PAGES	(10)
-#define IPC_LOG_MISC_PAGES	(30)
-#define IPC_LOG_TX_RX_PAGES	(30)
+#define IPC_LOG_PWR_PAGES	(6)
+#define IPC_LOG_MISC_PAGES	(10)
+#define IPC_LOG_TX_RX_PAGES	(10)
 #define DATA_BYTES_PER_LINE	(32)
 
 #define M_IRQ_BITS		(M_RX_FIFO_WATERMARK_EN | M_RX_FIFO_LAST_EN |\
@@ -148,6 +149,19 @@
 	if (ctx) \
 		ipc_log_string(ctx, x); \
 } while (0)
+
+#ifdef __init
+#undef __init
+#endif
+
+#ifdef __exit
+#undef __exit
+#endif
+
+#define __init
+#define __exit
+
+
 
 #define DMA_RX_BUF_SIZE		(2048)
 #define UART_CONSOLE_RX_WM	(2)
@@ -198,7 +212,6 @@ struct msm_geni_serial_port {
 	void *ipc_log_pwr;
 	void *ipc_log_misc;
 	void *console_log;
-	void *ipc_log_irqstatus;
 	unsigned int cur_baud;
 	int ioctl_count;
 	int edge_count;
@@ -415,21 +428,6 @@ static bool geni_wait_for_cmd_done(struct uart_port *uport, bool is_irq_masked)
 
 	return timeout ? 0 : 1;
 }
-
-#ifdef OPLUS_FEATURE_POWERINFO_FTM
-static struct pinctrl *serial_pinctrl = NULL;
-static struct pinctrl_state *serial_pinctrl_state_disable = NULL;
-#endif
-
-#ifdef OPLUS_FEATURE_POWERINFO_FTM
-extern bool oem_disable_uart(void);
-bool boot_with_console(void)
-{
-	return !oem_disable_uart();
-}
-
-EXPORT_SYMBOL(boot_with_console);
-#endif
 
 static void msm_geni_serial_config_port(struct uart_port *uport, int cfg_flags)
 {
@@ -978,12 +976,6 @@ __msm_geni_serial_console_write(struct uart_port *uport, const char *s,
 	int bytes_to_send = count;
 	int fifo_depth = DEF_FIFO_DEPTH_WORDS;
 	int tx_wm = DEF_TX_WM;
-
-#ifdef OPLUS_FEATURE_POWERINFO_FTM
-	if (!boot_with_console()) {
-		return;
-	}
-#endif
 
 	for (i = 0; i < count; i++) {
 		if (s[i] == '\n')
@@ -2995,7 +2987,7 @@ static void console_unregister(struct uart_driver *drv)
 static void msm_geni_serial_debug_init(struct uart_port *uport, bool console)
 {
 	struct msm_geni_serial_port *msm_port = GET_DEV_PORT(uport);
-	char name[35];
+	char name[30];
 
 	msm_port->dbg = debugfs_create_dir(dev_name(uport->dev), NULL);
 	if (IS_ERR_OR_NULL(msm_port->dbg))
@@ -3037,15 +3029,6 @@ static void msm_geni_serial_debug_init(struct uart_port *uport, bool console)
 					IPC_LOG_MISC_PAGES, name, 0);
 			if (!msm_port->ipc_log_misc)
 				dev_info(uport->dev, "Err in Misc IPC Log\n");
-		}
-		memset(name, 0, sizeof(name));
-		if (!msm_port->ipc_log_irqstatus) {
-			scnprintf(name, sizeof(name), "%s%s",
-					dev_name(uport->dev), "_irqstatus");
-			msm_port->ipc_log_irqstatus = ipc_log_context_create(
-					IPC_LOG_MISC_PAGES, name, 0);
-			if (!msm_port->ipc_log_irqstatus)
-				dev_info(uport->dev, "Err in irqstatus IPC Log\n");
 		}
 	} else {
 		memset(name, 0, sizeof(name));
@@ -3138,13 +3121,14 @@ static const struct uart_ops msm_geni_serial_pops = {
 
 static const struct of_device_id msm_geni_device_tbl[] = {
 #if defined(CONFIG_SERIAL_CORE_CONSOLE) || defined(CONFIG_CONSOLE_POLL)
-	{ .compatible = "qcom,msm-geni-console",
+	{ .compatible = "qcom,msm-geni-console-oem",
 			.data = (void *)&msm_geni_console_driver},
 #endif
 	{ .compatible = "qcom,msm-geni-serial-hs",
 			.data = (void *)&msm_geni_serial_hs_driver},
 	{},
 };
+
 
 static int msm_geni_serial_get_ver_info(struct uart_port *uport)
 {
@@ -3185,29 +3169,25 @@ exit_ver_info:
 	return ret;
 }
 
-#ifdef OPLUS_FEATURE_POWERINFO_FTM
-static bool oplus_charge_id_reconfig(struct platform_device *pdev, struct uart_driver *drv)
+struct oemconsole {
+	bool default_console;
+	bool console_initialized;
+};
+
+static struct oemconsole oem_console  = {
+	.default_console       = false,
+	.console_initialized   = false,
+};
+
+static int __init parse_console_config(char *str)
 {
-	//TODO: add charger id control here
-	if (drv == &msm_geni_console_driver) {
-		pr_err("%s: console start get pinctrl\n", __FUNCTION__);
-		serial_pinctrl = devm_pinctrl_get(&pdev->dev);
-		if (IS_ERR_OR_NULL(serial_pinctrl)) {
-			dev_err(&pdev->dev, "No serial_pinctrl config specified!\n");
-		} else {
-			serial_pinctrl_state_disable =
-			pinctrl_lookup_state(serial_pinctrl, PINCTRL_SLEEP);
-			if (IS_ERR_OR_NULL(serial_pinctrl_state_disable)) {
-				dev_err(&pdev->dev, "No serial_pinctrl_state_disable config specified!\n");
-			} else {
-				pinctrl_select_state(serial_pinctrl, serial_pinctrl_state_disable);
-			}
-		}
-		return true;
-	}
-	return false;
+	if (str != NULL)
+		oem_console.default_console = true;
+	return 0;
 }
-#endif
+early_param("console", parse_console_config);
+static int  msm_serial_oem_pinctrl_init(void);
+static int  oem_msm_geni_serial_init(void);
 
 static int msm_geni_serial_probe(struct platform_device *pdev)
 {
@@ -3232,12 +3212,6 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "%s: No matching device found", __func__);
 		return -ENODEV;
 	}
-	
-#ifdef OPLUS_FEATURE_POWERINFO_FTM
-   if (!boot_with_console() && oplus_charge_id_reconfig(pdev, drv)) { 
-		return -ENODEV; 
-	}
-#endif
 
 	if (pdev->dev.of_node) {
 		if (drv->cons) {
@@ -3739,12 +3713,33 @@ static void msm_geni_serial_ssr_up(struct device *dev)
 	mutex_unlock(&port->uart_ssr.ssr_lock);
 }
 
+
+static const struct of_device_id msm_geni_device_tbl_oem_hs[] = {
+	{ .compatible = "qcom,msm-geni-serial-hs"},
+	{},
+};
+
 static struct platform_driver msm_geni_serial_platform_driver = {
 	.remove = msm_geni_serial_remove,
 	.probe = msm_geni_serial_probe,
 	.driver = {
 		.name = "msm_geni_serial",
-		.of_match_table = msm_geni_device_tbl,
+		.of_match_table = msm_geni_device_tbl_oem_hs,
+		.pm = &msm_geni_serial_pm_ops,
+	},
+};
+
+static const struct of_device_id msm_geni_device_tbl_oem_console[] = {
+	{ .compatible = "qcom,msm-geni-console-oem",},
+	{},
+};
+
+static struct platform_driver msm_geni_serial_platform_driver_oem_console = {
+	.remove = msm_geni_serial_remove,
+	.probe = msm_geni_serial_probe,
+	.driver = {
+		.name = "msm_geni_serial_oem",
+		.of_match_table = msm_geni_device_tbl_oem_console,
 		.pm = &msm_geni_serial_pm_ops,
 	},
 };
@@ -3776,16 +3771,6 @@ static int __init msm_geni_serial_init(void)
 		msm_geni_console_port.uport.line = i;
 	}
 
-#ifdef OPLUS_FEATURE_POWERINFO_FTM
-	if (!boot_with_console()) {
-		msm_geni_console_driver.cons = NULL;
-	}
-#endif
-
-	ret = console_register(&msm_geni_console_driver);
-	if (ret)
-		return ret;
-
 	ret = uart_register_driver(&msm_geni_serial_hs_driver);
 	if (ret) {
 		uart_unregister_driver(&msm_geni_console_driver);
@@ -3800,6 +3785,12 @@ static int __init msm_geni_serial_init(void)
 	}
 
 	pr_info("%s: Driver initialized", __func__);
+
+	if(oem_console.default_console == 1)
+		 oem_msm_geni_serial_init();
+	else
+		 msm_serial_oem_pinctrl_init();
+
 	return ret;
 }
 module_init(msm_geni_serial_init);
@@ -3811,6 +3802,110 @@ static void __exit msm_geni_serial_exit(void)
 	console_unregister(&msm_geni_console_driver);
 }
 module_exit(msm_geni_serial_exit);
+
+
+static int oem_msm_geni_serial_init(void)
+{
+	int ret = 0;
+
+	pr_err("%s console_initialized=%d \n", __func__,oem_console.console_initialized);
+
+	if(oem_console.console_initialized != 1 ) {
+		oem_console.console_initialized = 1;
+		ret = console_register(&msm_geni_console_driver);
+		if (ret)
+			return ret;
+
+		ret = platform_driver_register(&msm_geni_serial_platform_driver_oem_console);
+		if (ret) {
+			console_unregister(&msm_geni_console_driver);
+			return ret;
+		}
+		pr_info("%s: initialized", __func__);
+	}
+	return ret;
+}
+
+
+
+static int msm_serial_pinctrl_probe(struct platform_device *pdev)
+{
+
+	struct pinctrl *pinctrl = NULL;
+	struct pinctrl_state *set_state = NULL;
+	struct device *dev = &pdev->dev;
+
+	pr_err("%s\n", __func__);
+	pinctrl = devm_pinctrl_get(dev);
+
+	if (pinctrl != NULL) {
+
+		set_state = pinctrl_lookup_state(
+				pinctrl, "uart_pinctrl_deactive");
+
+		if (set_state != NULL)
+			pinctrl_select_state(pinctrl, set_state);
+
+		devm_pinctrl_put(pinctrl);
+	}
+	return 0;
+}
+
+static int msm_serial_pinctrl_remove(struct platform_device *pdev)
+{
+	return 0;
+}
+
+
+static const struct of_device_id oem_serial_pinctrl_of_match[] = {
+	{ .compatible = "oem,oem_serial_pinctrl" },
+	{}
+};
+
+
+static struct platform_driver msm_platform_serial_pinctrl_driver = {
+	.remove = msm_serial_pinctrl_remove,
+	.probe = msm_serial_pinctrl_probe,
+	.driver = {
+		.name = "oem_serial_pinctrl",
+		.of_match_table = oem_serial_pinctrl_of_match,
+	},
+};
+
+static int	msm_serial_oem_pinctrl_init(void)
+{
+	int ret = 0;
+
+	pr_err("%s\n", __func__);
+
+	ret = platform_driver_register(&msm_platform_serial_pinctrl_driver);
+
+	return ret;
+}
+EXPORT_SYMBOL(msm_serial_oem_pinctrl_init);
+
+#define SERIAL_CMDLINE "ttyMSM0,115200n8"
+char oem_force_cmdline_str[60];
+
+int msm_serial_oem_init(void)
+{
+	int ret = 0;
+
+	pr_err("%s\n", __func__);
+
+	memcpy(oem_force_cmdline_str, SERIAL_CMDLINE, sizeof(SERIAL_CMDLINE));
+	force_oem_console_setup(&oem_force_cmdline_str[0]);
+	oem_msm_geni_serial_init();
+	return ret;
+}
+EXPORT_SYMBOL(msm_serial_oem_init);
+
+void msm_serial_oem_exit(void)
+{
+	pr_err("%s\n", __func__);
+	msm_geni_serial_exit();
+}
+EXPORT_SYMBOL(msm_serial_oem_exit);
 
 MODULE_DESCRIPTION("Serial driver for GENI based QTI serial cores");
 MODULE_LICENSE("GPL v2");

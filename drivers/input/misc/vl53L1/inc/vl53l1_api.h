@@ -1048,8 +1048,8 @@ VL53L1_Error VL53L1_GetMultiRangingData(VL53L1_DEV Dev,
  * VL53L1_ClearInterruptAndStartMeasurement(). Depending on the PresetMode
  * currently set parts of the returned data structure may be not relevant.
  *
- * @param   Dev                          Device Handle
- * @param   VL53L1_AdditionalData_t      Pointer to Additional data
+ * @param   Dev                      Device Handle
+ * @param   pAdditionalData          Pointer to Additional data
  * @return  VL53L1_ERROR_NONE        Success
  * @return  "Other error code"       See ::VL53L1_Error
  */
@@ -1181,9 +1181,6 @@ VL53L1_Error VL53L1_GetXTalkCompensationEnable(VL53L1_DEV Dev,
  *
  * @param   Dev                  Device Handle
  * @param   CalibrationOption    Select the Calibration to be run :
- * @param                        VL53L1_XTALKCALIBRATIONMODE_NO_TARGET the
- * calibration works on its own and changes the current preset mode so user
- * must call again @a VL53L1_SetPresetMode() after the calibration
  * @param                        CalibrationOption
  * @li VL53L1_XTALKCALIBRATIONMODE_SINGLE_TARGET the calibration uses current
  * preset and distance mode without altering them.<br>
@@ -1221,11 +1218,7 @@ VL53L1_Error VL53L1_PerformXTalkCalibration(VL53L1_DEV Dev,
  * @param   OffsetCalibrationMode     Offset Calibration Mode valid values are:
  * @li                                VL53L1_OFFSETCALIBRATIONMODE_STANDARD
  * @li                                VL53L1_OFFSETCALIBRATIONMODE_PRERANGE_ONLY
- */
-/**
  * @li                                VL53L1_OFFSETCALIBRATIONMODE_MULTI_ZONE
- */
-/**
  *
  * @return  VL53L1_ERROR_NONE         Success
  * @return  "Other error code"        See ::VL53L1_Error
@@ -1386,9 +1379,9 @@ VL53L1_Error VL53L1_GetZoneCalibrationData(VL53L1_DEV Dev,
  * @note This function doesn't Accesses the device
  *
  * @param   Dev                          Device Handle
- * @param   *pOpticalCentreX             pointer to the X position of center
+ * @param   pOpticalCenterX              pointer to the X position of center
  * in 16.16 fix point
- * @param   *pOpticalCentreY             pointer to the Y position of center
+ * @param   pOpticalCenterY              pointer to the Y position of center
  * in 16.16 fix point
  * @return  VL53L1_ERROR_NONE            Success
  * @return  "Other error code"           See ::VL53L1_Error

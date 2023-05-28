@@ -34,6 +34,12 @@
 /* Expand it to 2x for handling atleast 2 connectors safely */
 #define SDE_CRTC_FRAME_EVENT_SIZE	(4 * 2)
 
+#define DSI_PANEL_SAMSUNG_S6E3HC2 0
+#define DSI_PANEL_SAMSUNG_S6E3FC2X01 1
+#define DSI_PANEL_SAMSUNG_SOFEF03F_M 2
+
+extern char dsi_panel_name;
+
 /**
  * enum sde_crtc_client_type: crtc client type
  * @RT_CLIENT:	RealTime client like video/cmd mode display
@@ -431,18 +437,15 @@ struct sde_crtc_state {
 	u32 sbuf_prefill_line;
 	u64 sbuf_clk_rate[2];
 	bool sbuf_clk_shifted;
+	bool fingerprint_mode;
+	bool fingerprint_pressed;
+	struct sde_hw_dim_layer *fingerprint_dim_layer;
 
 	u32 padding_height;
 	u32 padding_active;
 	u32 padding_dummy;
 
 	struct sde_crtc_respool rp;
-#ifdef OPLUS_BUG_STABILITY
-	bool fingerprint_mode;
-	bool fingerprint_pressed;
-	bool fingerprint_defer_sync;
-	struct sde_hw_dim_layer *fingerprint_dim_layer;
-#endif /* OPLUS_BUG_STABILITY */
 };
 
 enum sde_crtc_irq_state {
@@ -855,10 +858,6 @@ void sde_crtc_misr_setup(struct drm_crtc *crtc, bool enable, u32 frame_count);
 int sde_crtc_calc_vpadding_param(struct drm_crtc_state *state,
 		uint32_t crtc_y, uint32_t crtc_h, uint32_t *padding_y,
 		uint32_t *padding_start, uint32_t *padding_height);
-
-#ifdef OPLUS_BUG_STABILITY
-struct sde_kms *_sde_crtc_get_kms_(struct drm_crtc *crtc);
-#endif /* OPLUS_BUG_STABILITY */
 
 /**
  * sde_crtc_get_num_datapath - get the number of datapath active

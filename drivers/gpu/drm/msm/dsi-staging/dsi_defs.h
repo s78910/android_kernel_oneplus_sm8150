@@ -53,15 +53,6 @@
 #define display_for_each_ctrl(index, display) \
 	for (index = 0; (index < (display)->ctrl_count) &&\
 			(index < MAX_DSI_CTRLS_PER_DISPLAY); index++)
-#ifdef OPLUS_BUG_STABILITY
-#define DSI_WARN(fmt, ...)	DRM_WARN("[msm-dsi-warn]: "fmt, ##__VA_ARGS__)
-#define DSI_ERR(fmt, ...)	DRM_DEV_ERROR(NULL, "[msm-dsi-error]: " fmt, \
-								##__VA_ARGS__)
-#define DSI_INFO(fmt, ...)	DRM_DEV_INFO(NULL, "[msm-dsi-info]: "fmt, \
-								##__VA_ARGS__)
-#define DSI_DEBUG(fmt, ...)	DRM_DEV_DEBUG(NULL, "[msm-dsi-debug]: "fmt, \
-								##__VA_ARGS__)
-#endif /* OPLUS_BUG_STABILITY */
 /**
  * enum dsi_pixel_format - DSI pixel formats
  * @DSI_PIXEL_FORMAT_RGB565:
@@ -291,22 +282,6 @@ enum dsi_dyn_clk_feature_type {
  * @DSI_CMD_SET_POST_TIMING_SWITCH:        Post timing switch
  * @DSI_CMD_SET_QSYNC_ON                   Enable qsync mode
  * @DSI_CMD_SET_QSYNC_OFF                  Disable qsync mode
- #ifdef OPLUS_BUG_STABILITY
- * @DSI_CMD_POST_ON_BACKLIGHT:             Panel on cmd send for AOD and Fingerprint
- * @DSI_CMD_AOD_ON:                        Panel AOD on cmd
- * @DSI_CMD_AOD_OFF:                       Panel AOD off cmd
- * @DSI_CMD_HBM_ON:                        Panel Fingerprint high brightness 670nit on cmd
- * @DSI_CMD_HBM_OFF:                       Panel Fingerprint high brightness off cmd
- * @DSI_CMD_AOD_HBM_ON:                    Panel AOD and Fingerprint high brightness  670nit on cmd
- * @DSI_CMD_AOD_HBM_OFF:                   Panel AOD and Fingerprint high brightness off cmd
- * @DSI_CMD_SEED_DCI_P3:                   Panel seed level 3 cmd
- * @DSI_CMD_SEED_SRGB:                     Panel seed SRGB mode cmd
- * @DSI_CMD_SEED_OFF:                      Panel seed off cmd
- * @DSI_CMD_NORMAL_HBM_ON:                 Panel normal HBM 600nit on cmd
- * @DSI_CMD_CABC_OFF:                      Shutdown IC CABC cmd
- * @DSI_CMD_CABC_LOW_LEVEL:                Load 11.5% CABC cmd
- * @DSI_CMD_CABC_HIGH_LEVEL,               Load 25% CABC cmd
-#endif // OPLUS_BUG_STABILITY
  * @DSI_CMD_SET_MAX
  */
 enum dsi_cmd_set_type {
@@ -333,48 +308,48 @@ enum dsi_cmd_set_type {
 	DSI_CMD_SET_POST_TIMING_SWITCH,
 	DSI_CMD_SET_QSYNC_ON,
 	DSI_CMD_SET_QSYNC_OFF,
-#ifdef OPLUS_BUG_STABILITY
-	DSI_CMD_POST_ON_BACKLIGHT,
-	DSI_CMD_AOD_ON,
-	DSI_CMD_AOD_OFF,
-	DSI_CMD_HBM_ON,
-	DSI_CMD_HBM_OFF,
-	DSI_CMD_AOD_HBM_ON,
-	DSI_CMD_AOD_HBM_OFF,
-	DSI_CMD_SEED_MODE0,
-	DSI_CMD_SEED_MODE1,
-	DSI_CMD_SEED_MODE2,
-	DSI_CMD_SEED_MODE3,
-	DSI_CMD_SEED_MODE4,
-	DSI_CMD_SEED_OFF,
-	DSI_CMD_LOADING_EFFECT_ON,
-	DSI_CMD_LOADING_EFFECT_OFF,
-	DSI_CMD_NORMAL_HBM_ON,
-	DSI_CMD_AOD_HIGH_LIGHT_MODE,
-	DSI_CMD_AOD_LOW_LIGHT_MODE,
-	DSI_CMD_CABC_OFF,
-	DSI_CMD_CABC_LOW_MODE,
-	DSI_CMD_CABC_HIGH_MODE,
-	DSI_CMD_DATA_DIMMING_ON,
-	DSI_CMD_DATA_DIMMING_OFF,
-	DSI_CMD_OSC_CLK_MODEO0,
-	DSI_CMD_OSC_CLK_MODEO1,
-	DSI_CMD_SEED_ENTER,
-	DSI_CMD_SEED_EXIT,
-	DSI_CMD_HBM_ENTER_SWITCH,
-	DSI_CMD_HBM_ENTER1_SWITCH,
-	DSI_CMD_HBM_ENTER2_SWITCH,
-	DSI_CMD_HBM_EXIT_SWITCH,
-	DSI_CMD_HBM_EXIT1_SWITCH,
-	DSI_CMD_HBM_EXIT2_SWITCH,
-#ifdef OPLUS_FEATURE_AOD_RAMLESS
-	DSI_CMD_FAILSAFE_ON,
-	DSI_CMD_FAILSAFE_OFF,
-#endif /* OPLUS_FEATURE_AOD_RAMLESS */
-	DSI_CMD_HBM_BACKLIGHT_ON,
-	DSI_CMD_HBM_BACKLIGHT_OFF,
-#endif /* OPLUS_BUG_STABILITY */
-        DSI_CMD_SET_GAMMA_FLASH_PRE_READ_1,
+	DSI_CMD_SET_HBM_BRIGHTNESS_ON,
+	DSI_CMD_SET_HBM_BRIGHTNESS_OFF,
+	DSI_CMD_SET_HBM_ON_1,
+	DSI_CMD_SET_HBM_ON_2,
+	DSI_CMD_SET_HBM_ON_3,
+	DSI_CMD_SET_HBM_ON_4,
+	DSI_CMD_SET_HBM_ON_5,
+	DSI_CMD_SET_HBM_OFF,
+	DSI_CMD_SET_PANEL_SERIAL_NUMBER,
+	DSI_CMD_SET_AOD_ON_1,
+	DSI_CMD_SET_AOD_ON_2,
+	DSI_CMD_SET_AOD_ON_3,
+	DSI_CMD_SET_AOD_ON_4,
+	DSI_CMD_SET_AOD_ON_5,
+	DSI_CMD_SET_AOD_OFF,
+	DSI_CMD_AOD_OFF_HBM_ON_SETTING,
+	DSI_CMD_SET_AOD_OFF_NEW,
+	DSI_CMD_HBM_OFF_AOD_ON_SETTING,
+	DSI_CMD_REAL_AOD_OFF_HBM_ON_SETTING,
+	DSI_CMD_SET_AOD_OFF_SAMSUNG,
+	DSI_CMD_SET_DCI_P3_ON,
+	DSI_CMD_SET_DCI_P3_OFF,
+	DSI_CMD_SET_NIGHT_ON,
+	DSI_CMD_SET_NIGHT_OFF,
+	DSI_CMD_SET_PANEL_ID,
+	DSI_CMD_READ_SAMSUNG_PANEL_REGISTER_ON,
+	DSI_CMD_SET_PANEL_ID1,
+	DSI_CMD_SET_PANEL_ID2,
+	DSI_CMD_SET_PANEL_ID3,
+	DSI_CMD_SET_PANEL_ID4,
+	DSI_CMD_SET_PANEL_ID5,
+	DSI_CMD_SET_PANEL_ID6,
+	DSI_CMD_SET_PANEL_ID7,
+	DSI_CMD_READ_SAMSUNG_PANEL_REGISTER_OFF,
+	DSI_CMD_SET_ACL_MODE,
+	DSI_CMD_SET_LCDINFO_PRE,
+	DSI_CMD_SET_LCDINFO_POST,
+	DSI_CMD_SET_CODE_INFO,
+	DSI_CMD_SET_STAGE_INFO,
+	DSI_CMD_SET_PRODUCTION_INFO,
+	DSI_CMD_SET_ESD_LOGREAD_PREREAD,
+	DSI_CMD_SET_GAMMA_FLASH_PRE_READ_1,
 	DSI_CMD_SET_GAMMA_FLASH_PRE_READ_2,
 	DSI_CMD_SET_GAMMA_FLASH_READ_FB,
 	DSI_CMD_SET_LEVEL2_KEY_ENABLE,
@@ -385,6 +360,22 @@ enum dsi_cmd_set_type {
 	DSI_CMD_SET_GAMMA_OTP_READ_B3_SMRPS,
 	DSI_CMD_SET_GAMMA_OTP_READ_B3,
 	DSI_CMD_SET_LEVEL2_KEY_DISABLE,
+	DSI_CMD_SET_NATIVE_DISPLAY_P3_ON,
+	DSI_CMD_SET_NATIVE_DISPLAY_P3_OFF,
+	DSI_CMD_SET_NATIVE_DISPLAY_WIDE_COLOR_ON,
+	DSI_CMD_SET_NATIVE_DISPLAY_WIDE_COLOR_OFF,
+	DSI_CMD_SET_NATIVE_DISPLAY_SRGB_COLOR_ON,
+	DSI_CMD_SET_NATIVE_DISPLAY_SRGB_COLOR_OFF,
+	DSI_CMD_SET_113MHZ_OSC_ON,
+	DSI_CMD_POST_ON_BACKLIGHT,
+	DSI_CMD_LOADING_EFFECT_ON,
+	DSI_CMD_LOADING_EFFECT_OFF,
+	DSI_CMD_LOADING_CUSTOMER_RGB_ON,
+	DSI_CMD_LOADING_CUSTOMER_RGB_OFF,
+	DSI_CMD_LOADING_CUSTOMER_P3_ON,
+	DSI_CMD_LOADING_CUSTOMER_P3_OFF,
+	DSI_CMD_SET_PANEL_COMMAND,
+	DSI_CMD_SET_SEED_COMMAND,
 	DSI_CMD_SET_MAX
 };
 
@@ -693,17 +684,6 @@ struct dsi_display_mode_priv_info {
 	struct msm_display_dsc_info dsc;
 	bool dsc_enabled;
 	struct msm_roi_caps roi_caps;
-	#ifdef OPLUS_BUG_STABILITY
-	int fod_th_brightness;
-	int fod_on_vblank;
-	int fod_off_vblank;
-	int fod_on_delay;
-	int fod_off_delay;
-	int fod_on_vblank_above_th;
-	int fod_off_vblank_above_th;
-	int fod_on_delay_above_th;
-	int fod_off_delay_above_th;
-	#endif /* OPLUS_BUG_STABILITY */
 };
 
 /**

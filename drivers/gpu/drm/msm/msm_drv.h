@@ -103,6 +103,7 @@ enum msm_mdp_plane_property {
 
 	/* range properties */
 	PLANE_PROP_ZPOS = PLANE_PROP_BLOBCOUNT,
+    PLANE_PROP_CUSTOM,
 	PLANE_PROP_ALPHA,
 	PLANE_PROP_COLOR_FILL,
 	PLANE_PROP_H_DECIMATE,
@@ -121,9 +122,6 @@ enum msm_mdp_plane_property {
 	PLANE_PROP_PREFILL_TIME,
 	PLANE_PROP_SCALER_V1,
 	PLANE_PROP_SCALER_V2,
-#ifdef OPLUS_BUG_STABILITY
-	PLANE_PROP_CUSTOM,
-#endif /* OPLUS_BUG_STABILITY */
 	PLANE_PROP_ROT_OUT_FB,
 	PLANE_PROP_INVERSE_PMA,
 
@@ -164,14 +162,12 @@ enum msm_mdp_crtc_property {
 	CRTC_PROP_SECURITY_LEVEL,
 	CRTC_PROP_IDLE_TIMEOUT,
 	CRTC_PROP_DEST_SCALER,
-#ifdef OPLUS_BUG_STABILITY
-	CRTC_PROP_CUSTOM,
-#endif /* OPLUS_BUG_STABILITY */
 	CRTC_PROP_CAPTURE_OUTPUT,
 
 	CRTC_PROP_IDLE_PC_STATE,
 
 	/* total # of properties */
+	CRTC_PROP_CUSTOM,
 	CRTC_PROP_COUNT
 };
 
@@ -197,9 +193,7 @@ enum msm_mdp_conn_property {
 	CONNECTOR_PROP_ROI_V1,
 	CONNECTOR_PROP_BL_SCALE,
 	CONNECTOR_PROP_AD_BL_SCALE,
-#ifdef OPLUS_BUG_STABILITY
-	CONNECTOR_PROP_CUSTOM,
-#endif /* OPLUS_BUG_STABILITY */
+
 	/* enum/bitmask properties */
 	CONNECTOR_PROP_TOPOLOGY_NAME,
 	CONNECTOR_PROP_TOPOLOGY_CONTROL,
@@ -207,6 +201,7 @@ enum msm_mdp_conn_property {
 	CONNECTOR_PROP_LP,
 	CONNECTOR_PROP_FB_TRANSLATION_MODE,
 	CONNECTOR_PROP_QSYNC_MODE,
+	CONNECTOR_PROP_CUSTOM,
 
 	/* total # of properties */
 	CONNECTOR_PROP_COUNT
@@ -695,6 +690,7 @@ struct msm_drm_private {
 
 	/* update the flag when msm driver receives shutdown notification */
 	bool shutdown_in_progress;
+	ktime_t  commit_end_time;
 };
 
 /* get struct msm_kms * from drm_device * */

@@ -98,6 +98,8 @@ struct i2c_data {
 #ifdef USE_CAMERA_CCI
 int __init stmvl53l1_init_cci(void);
 void __exit stmvl53l1_exit_cci(void*);
+int stmvl53l1_enable_pinctrl(void);
+int stmvl53l1_disable_pinctrl(void);
 #else
 int stmvl53l1_init_i2c(void);
 void __exit stmvl53l1_exit_i2c(void *arg);

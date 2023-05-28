@@ -71,15 +71,15 @@
 #include "internal.h"
 
 #include <trace/events/sched.h>
+#include <linux/oem/im.h>
+#ifdef CONFIG_ADJ_CHAIN
+#include <linux/oem/adj_chain.h>
+#endif
 
 int suid_dumpable = 0;
 
 static LIST_HEAD(formats);
 static DEFINE_RWLOCK(binfmt_lock);
-
-#ifdef OPLUS_FEATURE_UIFIRST
-extern pid_t allocator_pid;
-#endif
 
 void __register_binfmt(struct linux_binfmt * fmt, int insert)
 {
@@ -1151,6 +1151,12 @@ static int de_thread(struct task_struct *tsk)
 		list_replace_rcu(&leader->tasks, &tsk->tasks);
 		list_replace_init(&leader->sibling, &tsk->sibling);
 
+#ifdef CONFIG_ADJ_CHAIN
+		tsk->adj_chain_status |= 1 << AC_PROM_LEADER;
+		adj_chain_detach(tsk);
+		adj_chain_attach(tsk);
+		tsk->adj_chain_status &= ~(1 << AC_PROM_LEADER);
+#endif
 		tsk->group_leader = tsk;
 		leader->group_leader = tsk;
 
@@ -1239,6 +1245,7 @@ void __set_task_comm(struct task_struct *tsk, const char *buf, bool exec)
 	task_lock(tsk);
 	trace_task_rename(tsk, buf);
 	strlcpy(tsk->comm, buf, sizeof(tsk->comm));
+	im_wmi(tsk);
 	task_unlock(tsk);
 	perf_event_comm(tsk, exec);
 }
@@ -1267,6 +1274,8 @@ int flush_old_exec(struct linux_binprm * bprm)
 	 * to be lockless.
 	 */
 	set_mm_exe_file(bprm->mm, bprm->file);
+
+	would_dump(bprm, bprm->file);
 
 	/*
 	 * Release all of the old mmap stuff
@@ -1688,15 +1697,12 @@ static int exec_binprm(struct linux_binprm *bprm)
 		ptrace_event(PTRACE_EVENT_EXEC, old_vpid);
 		proc_exec_connector(current);
 	}
+	if (strcmp(current->comm, "surfaceflinger") == 0)
+		current->compensate_need = 2;
 
 	return ret;
 }
 
-#ifdef CONFIG_OPLUS_SECURE_GUARD
-#if defined(CONFIG_OPLUS_EXECVE_BLOCK) || defined(CONFIG_OPLUS_EXECVE_REPORT)
-extern int oplus_exec_block(struct file *file);
-#endif /* CONFIG_OPLUS_EXECVE_BLOCK or CONFIG_OPLUS_EXECVE_REPORT */
-#endif /* CONFIG_OPLUS_SECURE_GUARD */
 /*
  * sys_execve() executes a new program.
  */
@@ -1751,15 +1757,6 @@ static int do_execveat_common(int fd, struct filename *filename,
 	if (IS_ERR(file))
 		goto out_unmark;
 
-#ifdef CONFIG_OPLUS_SECURE_GUARD
-#if defined(CONFIG_OPLUS_EXECVE_BLOCK) || defined(CONFIG_OPLUS_EXECVE_REPORT)
-    retval = oplus_exec_block(file);
-	if (retval){
-		fput(file);
-		goto out_unmark;
-	}
-#endif /* CONFIG_OPLUS_EXECVE_BLOCK or CONFIG_OPLUS_EXECVE_REPORT */
-#endif /* CONFIG_OPLUS_SECURE_GUARD */
 	sched_exec();
 
 	bprm->file = file;
@@ -1814,8 +1811,6 @@ static int do_execveat_common(int fd, struct filename *filename,
 	retval = copy_strings(bprm->argc, argv, bprm);
 	if (retval < 0)
 		goto out;
-
-	would_dump(bprm, bprm->file);
 
 	retval = exec_binprm(bprm);
 	if (retval < 0)

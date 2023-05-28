@@ -23,10 +23,6 @@
 #include <uapi/linux/sched/types.h>
 #include <linux/scatterlist.h>
 #include <linux/vmalloc.h>
-#if defined(OPLUS_FEATURE_MEMLEAK_DETECT) && defined(CONFIG_DUMP_TASKS_MEM)
-#include <linux/atomic.h>
-#include <linux/sched/task.h>
-#endif
 #include "ion.h"
 
 void *ion_heap_map_kernel(struct ion_heap *heap,
@@ -109,12 +105,12 @@ int ion_heap_map_user(struct ion_heap *heap, struct ion_buffer *buffer,
 
 static int ion_heap_clear_pages(struct page **pages, int num, pgprot_t pgprot)
 {
-	void *addr = vm_map_ram(pages, num, -1, pgprot);
+	void *addr = vmap(pages, num, VM_MAP, pgprot);
 
 	if (!addr)
 		return -ENOMEM;
 	memset(addr, 0, PAGE_SIZE * num);
-	vm_unmap_ram(addr, num);
+	vunmap(addr);
 
 	return 0;
 }
@@ -193,13 +189,6 @@ static size_t _ion_heap_freelist_drain(struct ion_heap *heap, size_t size,
 	if (ion_heap_freelist_size(heap) == 0)
 		return 0;
 
-#if defined(OPLUS_FEATURE_MEMLEAK_DETECT) && defined(CONFIG_DUMP_TASKS_MEM)
-	if (buffer->tsk) {
-		atomic64_sub(buffer->size, &buffer->tsk->ions);
-		put_task_struct(buffer->tsk);
-		buffer->tsk = NULL;
-	}
-#endif
 	spin_lock(&heap->free_lock);
 	if (size == 0)
 		size = heap->free_list_size;

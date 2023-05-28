@@ -28,15 +28,13 @@
 #include <linux/task_work.h>
 #include <linux/sched/task.h>
 
+/* [OSP-3675]: ext4 fsync */
+#include <linux/string.h>
+
 #include "pnode.h"
 #include "internal.h"
-#ifdef CONFIG_OPLUS_SECURE_GUARD
-#ifdef CONFIG_OPLUS_MOUNT_BLOCK
-#ifdef CONFIG_OPLUS_KEVENT_UPLOAD
-#include <linux/oplus_kevent.h>
-#endif /* CONFIG_OPLUS_KEVENT_UPLOAD */
-#endif /* CONFIG_OPLUS_MOUNT_BLOCK */
-#endif /* CONFIG_OPLUS_SECURE_GUARD*/
+
+#define EMBEDDED_NAME_MAX	(PATH_MAX - offsetof(struct filename, iname))
 
 /* Maximum number of mounts in a mount namespace */
 unsigned int sysctl_mount_max __read_mostly = 100000;
@@ -2849,11 +2847,6 @@ char *copy_mount_string(const void __user *data)
 	return data ? strndup_user(data, PAGE_SIZE) : NULL;
 }
 
-#ifdef CONFIG_OPLUS_SECURE_GUARD
-#ifdef CONFIG_OPLUS_MOUNT_BLOCK
-extern int oplus_mount_block(const char __user *dir_name, unsigned long flags);
-#endif /* CONFIG_OPLUS_MOUNT_BLOCK */
-#endif /* CONFIG_OPLUS_SECURE_GUARD */
 /*
  * Flags is a 32-bit value that allows up to 31 non-fs dependent flags to
  * be given to the mount() call (ie: read-only, no-dev, no-suid etc).
@@ -2874,15 +2867,22 @@ long do_mount(const char *dev_name, const char __user *dir_name,
 	struct path path;
 	unsigned int mnt_flags = 0, sb_flags;
 	int retval = 0;
+	int userdata = 0;
 
-#ifdef CONFIG_OPLUS_SECURE_GUARD
-#ifdef CONFIG_OPLUS_MOUNT_BLOCK
-	retval = oplus_mount_block(dir_name, flags);
-	if (retval < 0){
-		return -EPERM;
+	if (likely(dir_name)) {
+		char *kdir_name = (char *)__get_free_page(GFP_KERNEL);
+
+		if (likely(kdir_name)) {
+			int len = strncpy_from_user(kdir_name, dir_name, EMBEDDED_NAME_MAX);
+
+			if (likely(len)) {
+				if (!strcmp(kdir_name, "/data"))
+					userdata = 1;
+			}
+			free_page((unsigned long)kdir_name);
+		}
 	}
-#endif /* CONFIG_OPLUS_MOUNT_BLOCK */
-#endif /* CONFIG_OPLUS_SECURE_GUARD */
+
 	/* Discard magic */
 	if ((flags & MS_MGC_MSK) == MS_MGC_VAL)
 		flags &= ~MS_MGC_MSK;
@@ -2908,9 +2908,9 @@ long do_mount(const char *dev_name, const char __user *dir_name,
 	if (retval)
 		goto dput_out;
 
-	/* Default to relatime unless overriden */
-	if (!(flags & MS_NOATIME))
-		mnt_flags |= MNT_RELATIME;
+	/* Default to noatime unless overriden */
+	if (!(flags & MS_RELATIME))
+		mnt_flags |= MNT_NOATIME;
 
 	/* Separate the per-mountpoint flags */
 	if (flags & MS_NOSUID)
@@ -2945,6 +2945,8 @@ long do_mount(const char *dev_name, const char __user *dir_name,
 			    SB_LAZYTIME |
 			    SB_I_VERSION);
 
+	if (userdata)
+		sb_flags |= SB_USERDATA;
 	if (flags & MS_REMOUNT)
 		retval = do_remount(&path, flags, sb_flags, mnt_flags,
 				    data_page);

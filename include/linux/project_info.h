@@ -45,6 +45,11 @@ struct project_info {
     /*for 8150R FOTA*/
 };
 
+#define DUMP_REASON_SIZE 256
+
+struct dump_info{
+    char    dump_reason[DUMP_REASON_SIZE];  //dump reason
+};
 
 struct component_info {
 	char *version;
@@ -89,12 +94,12 @@ enum COMPONENT_TYPE {
 	COMPONENT_MAX,
 };
 
-
+char *parse_function_builtin_return_address(unsigned long function_address);
 int push_component_info(enum COMPONENT_TYPE type,
 	char *version, char *manufacture);
 int reset_component_info(enum COMPONENT_TYPE type);
 uint32 get_hw_version(void);
-
+void save_dump_reason_to_smem(char *info, char *function_name);
 
 
 #endif

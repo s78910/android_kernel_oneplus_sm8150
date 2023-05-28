@@ -2917,7 +2917,7 @@ again:
 			 * in use to avoid freeing it when removing blocks.
 			 */
 			if (sbi->s_cluster_ratio > 1) {
-				pblk = ext4_ext_pblock(ex) + end - ee_block + 2;
+				pblk = ext4_ext_pblock(ex) + end - ee_block + 1;
 				partial_cluster =
 					-(long long) EXT4_B2C(sbi, pblk);
 			}
@@ -5020,9 +5020,6 @@ long ext4_fallocate(struct file *file, int mode, loff_t offset, loff_t len)
 	}
 out:
 	inode_unlock(inode);
-#if defined(CONFIG_OPLUS_FEATURE_EXT4_ASYNC_DISCARD)
-	ext4_update_time(EXT4_SB(inode->i_sb));
-#endif
 	trace_ext4_fallocate_exit(inode, offset, max_blocks, ret);
 	return ret;
 }

@@ -41,25 +41,26 @@ static ssize_t infrared_power_enable_store(struct device* pdev, struct device_at
 		INFRARED_LOG("would set infrared_power_enable : %d", g_infrared_state->infrared_power_enable);
 	}
 
-	if (enable > 0) {
-		res = regulator_enable(g_infrared_state->vdd);
-		//g_infrared_state->infrared_shutdown_state = 0;
-		INFRARED_LOG("enable, res : %d \n", res);
-	} else {
-		res = regulator_disable(g_infrared_state->vdd);
-		//g_infrared_state->infrared_shutdown_state = 1;
-		INFRARED_LOG("disable, res : %d \n", res);
-	}
+  if (enable > 0) {
+    res = regulator_enable(g_infrared_state->vdd);
+	  //g_infrared_state->infrared_shutdown_state = 0;
+    INFRARED_LOG("enable, res : %d \n", res);
+  } else {
+    res = regulator_disable(g_infrared_state->vdd);
+    //g_infrared_state->infrared_shutdown_state = 1;
+    INFRARED_LOG("disable, res : %d \n", res);
+  }
 
-	if (regulator_is_enabled(g_infrared_state->vdd) > 0) {
-		g_infrared_state->infrared_shutdown_state = 0;
-		g_infrared_state->infrared_power_enable = 1;
-	} else {
-		g_infrared_state->infrared_shutdown_state = 1;
-		g_infrared_state->infrared_power_enable = 0;
-	}
+  if (regulator_is_enabled(g_infrared_state->vdd) > 0) {
+    g_infrared_state->infrared_shutdown_state = 0;
+    g_infrared_state->infrared_power_enable = 1;
+  } else {
+    g_infrared_state->infrared_shutdown_state = 1;
+    g_infrared_state->infrared_power_enable = 0;
+  }
 
 	INFRARED_LOG("infrared_power_enable : %d, enable : %d", g_infrared_state->infrared_power_enable, enable);
+
 	return count;
 }
 
@@ -108,33 +109,33 @@ static ssize_t infrared_shut_down_state_show(struct device* dev,struct device_at
 static ssize_t infrared_shut_down_state2_store (struct device *pdev, struct device_attribute *attr,
 				 const char *buff, size_t count)
 {
-	unsigned long infrared_shut_down_state = 0;
+  unsigned long infrared_shut_down_state = 0;
 
-	INFRARED_LOG ("call");
+  INFRARED_LOG ("call");
 
-	if (g_infrared_state == NULL) {
-		INFRARED_ERR ("g_infrared_state == NULL \n");
-		return count;
-	}
+  if (g_infrared_state == NULL) {
+    INFRARED_ERR ("g_infrared_state == NULL \n");
+    return count;
+  }
 
-	if (sscanf (buff, "%lu", &infrared_shut_down_state) == 1) {
-		g_infrared_state->infrared_shutdown_state2 = infrared_shut_down_state;
-		INFRARED_LOG ("would set infrared_shut_down_state2 : %d", g_infrared_state->infrared_shutdown_state2);
-	}
-	INFRARED_LOG ("infrared_shut_down_state : %d", infrared_shut_down_state);
+  if (sscanf (buff, "%lu", &infrared_shut_down_state) == 1) {
+    g_infrared_state->infrared_shutdown_state2 = infrared_shut_down_state;
+    INFRARED_LOG ("would set infrared_shut_down_state2 : %d", g_infrared_state->infrared_shutdown_state2);
+  }
+  INFRARED_LOG ("infrared_shut_down_state : %d", infrared_shut_down_state);
 
-	return count;
+  return count;
 }
 
 static ssize_t infrared_shut_down_state2_show (struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
-	if (g_infrared_state == NULL) {
-		INFRARED_ERR ("g_infrared_state == NULL \n");
-		return snprintf (buf, PAGE_SIZE, "%d\n", 0);
-	}
+  if (g_infrared_state == NULL) {
+    INFRARED_ERR ("g_infrared_state == NULL \n");
+    return snprintf (buf, PAGE_SIZE, "%d\n", 0);
+  }
 
-	return snprintf (buf, PAGE_SIZE, "%d\n", g_infrared_state->infrared_shutdown_state2);
+  return snprintf (buf, PAGE_SIZE, "%d\n", g_infrared_state->infrared_shutdown_state2);
 }
 
 
@@ -145,7 +146,7 @@ static DEVICE_ATTR (infrared_shut_down_state2, S_IRUGO | S_IWUSR, infrared_shut_
 static struct attribute*  __attributes[] = {
 	&dev_attr_infrared_power_enable.attr,
 	&dev_attr_infrared_shut_down_state.attr,
-	&dev_attr_infrared_shut_down_state2.attr,
+  &dev_attr_infrared_shut_down_state2.attr,
 	NULL
 };
 
@@ -165,98 +166,98 @@ static void oneplus_parameter_init(struct oneplus_infrared_state* state)
 
 	g_infrared_state->infrared_power_enable = 0;
 	g_infrared_state->infrared_shutdown_state = 0;
-	g_infrared_state->infrared_shutdown_state2 = 1;
-	g_infrared_state->irq_times = 0;
+  g_infrared_state->infrared_shutdown_state2 = 1;
+  g_infrared_state->irq_times = 0;
 
 	return;
 }
 
 static void infrared_irq_check_work_func (struct work_struct *work)
 {
-	struct delayed_work *dwork = to_delayed_work (work);
-	struct oneplus_infrared_state *state = container_of(dwork, struct oneplus_infrared_state, infrared_irq_check_work);
+  struct delayed_work *dwork = to_delayed_work (work);
+  struct oneplus_infrared_state *state = container_of(dwork, struct oneplus_infrared_state, infrared_irq_check_work);
 
-	if (state == NULL) {
-		INFRARED_ERR ("infrared_irq_check_work_func error, state == NULL");
-		return;
-	}
+  if (state == NULL) {
+    INFRARED_ERR ("infrared_irq_check_work_func error, state == NULL");
+    return;
+  }
 
-	INFRARED_LOG ("irq_times : %d, infrared_shutdown_state2 : %d \n", state->irq_times, state->infrared_shutdown_state2);
+  INFRARED_LOG ("irq_times : %d, infrared_shutdown_state2 : %d \n", state->irq_times, state->infrared_shutdown_state2);
 
-	if (state->irq_times == 1) {
-		disable_irq_nosync (state->infrared_irq);
-		enable_irq (state->infrared_irq);
-	} else if (state->irq_times >= 2) {
-		INFRARED_LOG ("infrared notify event, irq_times : %d \n", state->irq_times);
-		state->infrared_shutdown_state2 = 1;
-	} else {
-		INFRARED_LOG ("unknow event, irq_times : %d \n", state->irq_times);
-	}
+  if (state->irq_times == 1) {
+    disable_irq_nosync (state->infrared_irq);
+    enable_irq (state->infrared_irq);
+  } else if (state->irq_times >= 2) {
+    INFRARED_LOG ("infrared notify event, irq_times : %d \n", state->irq_times);
+    state->infrared_shutdown_state2 = 1;
+  } else {
+    INFRARED_LOG ("unknow event, irq_times : %d \n", state->irq_times);
+  }
 
-	state->irq_times = 0;
+  state->irq_times = 0;
 
-	return;
+  return;
 }
 
 static irqreturn_t oneplus_infrared_detect_handler (int irq, void *dev_id)
 {
-	if (g_infrared_state == NULL) {
-		INFRARED_ERR ("g_infrared_state == NULL");
-		return -EINVAL;
-	}
+  if (g_infrared_state == NULL) {
+    INFRARED_ERR ("g_infrared_state == NULL");
+    return -EINVAL;
+  }
 
-	g_infrared_state->irq_times++;
+  g_infrared_state->irq_times++;
 
-	if (g_infrared_state->irq_times == 1)
-		mod_delayed_work (system_highpri_wq, &g_infrared_state->infrared_irq_check_work, msecs_to_jiffies (1));
+  if (g_infrared_state->irq_times == 1)
+      mod_delayed_work (system_highpri_wq, &g_infrared_state->infrared_irq_check_work, msecs_to_jiffies (1));
 
-	return IRQ_HANDLED;
+  return IRQ_HANDLED;
 }
 
 
 static void oneplus_infrared_interrupt_register (struct oneplus_infrared_state *state)
 {
-	struct device_node *np = NULL;
-	int err = 0;
+  struct device_node *np = NULL;
+  int err = 0;
 
-	np = state->dev->of_node;
+  np = state->dev->of_node;
 
-	state->pctrl = devm_pinctrl_get (state->dev);
-	if (IS_ERR (state->pctrl)) {
-		INFRARED_ERR ("failed to get pinctrl \n");
-		return;
-	};
+  state->pctrl = devm_pinctrl_get (state->dev);
+  if (IS_ERR (state->pctrl)) {
+    INFRARED_ERR ("failed to get pinctrl \n");
+    return;
+  };
 
-	state->shutdown_state = pinctrl_lookup_state (state->pctrl, "infrared_input");\
+  state->shutdown_state = pinctrl_lookup_state (state->pctrl, "infrared_input");\
 
-	if (IS_ERR (state->shutdown_state)) {
-		err = PTR_ERR (state->shutdown_state);
-		INFRARED_ERR ("pinctrl_lookup_state failed, err : %d \n", err);
-		return;
-	};
+  if (IS_ERR (state->shutdown_state)) {
+    err = PTR_ERR (state->shutdown_state);
+    INFRARED_ERR ("pinctrl_lookup_state failed, err : %d \n", err);
+    return;
+  };
 
-	pinctrl_select_state (state->pctrl, state->shutdown_state);
-	state->infrared_gpio = of_get_named_gpio (np, "infrared,irq-gpio", 0);
+  pinctrl_select_state (state->pctrl, state->shutdown_state);
+  state->infrared_gpio = of_get_named_gpio (np, "infrared,irq-gpio", 0);
 
-	if (!gpio_is_valid (state->infrared_gpio)) {
-		INFRARED_LOG ("gpio not specified \n");
-	} else {
-		err = gpio_request (state->infrared_gpio, "infrared-irq-gpio");
-		if (err)
-		INFRARED_LOG ("request infrared_gpio gpio failed, err : %d \n", err);
+  if (!gpio_is_valid (state->infrared_gpio)) {
+    INFRARED_LOG ("gpio not specified \n");
+  } else {
+    err = gpio_request (state->infrared_gpio, "infrared-irq-gpio");
+    if (err)
+      INFRARED_LOG ("request infrared_gpio gpio failed, err : %d \n", err);
 
-		err = gpio_direction_input (state->infrared_gpio);
-		msleep (50);
-		state->infrared_irq = gpio_to_irq (state->infrared_gpio);
+    err = gpio_direction_input (state->infrared_gpio);
+    msleep (50);
+    state->infrared_irq = gpio_to_irq (state->infrared_gpio);
 
-		if (request_irq(state->infrared_irq, &oneplus_infrared_detect_handler, IRQ_TYPE_EDGE_RISING, "infrared", NULL)) {
-			INFRARED_ERR ("IRQ LINE NOT AVAILABLE!!\n");
-			return;
-		}
-		irq_set_irq_wake (state->infrared_irq, 1);
-	}
+    if (request_irq(state->infrared_irq, &oneplus_infrared_detect_handler, IRQ_TYPE_EDGE_RISING, "infrared", NULL)) {
+      INFRARED_ERR ("IRQ LINE NOT AVAILABLE!!\n");
+      return;
+    }
+    irq_set_irq_wake (state->infrared_irq, 1);
+  }
 
-	INFRARED_LOG ("gpio %d irq:%d \n", state->infrared_gpio, state->infrared_irq);
+  INFRARED_LOG ("gpio %d irq:%d \n", state->infrared_gpio, state->infrared_irq);
 }
 
 
@@ -282,11 +283,11 @@ static int infrared_platform_probe(struct platform_device* pdev)
 
 	//get vdd power control
 	p_infrared_state->vdd = devm_regulator_get(p_infrared_state->dev, "vdd");
-	if (IS_ERR(p_infrared_state->vdd)) {
-		err = PTR_ERR(p_infrared_state->vdd);
-		INFRARED_ERR("regulator get vdd failed, err : %d \n", err);
-		goto power_get_fail;
-	} else {
+        if (IS_ERR(p_infrared_state->vdd)) {
+                err = PTR_ERR(p_infrared_state->vdd);
+                INFRARED_ERR("regulator get vdd failed, err : %d \n", err);
+                goto power_get_fail;
+        } else {
 		if (regulator_count_voltages(p_infrared_state->vdd) > 0) {
 			err = regulator_set_voltage(p_infrared_state->vdd, 2960000, 2960000);
 			if (err) {
@@ -308,9 +309,9 @@ static int infrared_platform_probe(struct platform_device* pdev)
 
 	oneplus_parameter_init(p_infrared_state);
 
-	oneplus_infrared_interrupt_register(p_infrared_state);
+  oneplus_infrared_interrupt_register(p_infrared_state);
 
-	INIT_DELAYED_WORK(&p_infrared_state->infrared_irq_check_work, infrared_irq_check_work_func);
+  INIT_DELAYED_WORK(&p_infrared_state->infrared_irq_check_work, infrared_irq_check_work_func);
 
 	INFRARED_LOG("success. \n");
 

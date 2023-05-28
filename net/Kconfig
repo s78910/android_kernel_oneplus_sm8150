@@ -85,6 +85,7 @@ config INET
 	  Short answer: say Y.
 
 if INET
+source "net/wireguard/Kconfig"
 source "net/ipv4/Kconfig"
 source "net/ipv6/Kconfig"
 source "net/netlabel/Kconfig"
@@ -191,6 +192,16 @@ config BRIDGE_NETFILTER
 	  ebtables.
 
 	  If unsure, say N.
+
+config SLA
+	default n
+	bool "to monitor netlink traffic"
+	help
+	  Realtime netlink traffic monitor.
+
+config SLA_ALGO
+	default n
+	bool "OnePlus SLA algorithm"
 
 source "net/netfilter/Kconfig"
 source "net/ipv4/netfilter/Kconfig"
@@ -464,9 +475,3 @@ config HAVE_CBPF_JIT
 # Extended BPF JIT (eBPF)
 config HAVE_EBPF_JIT
 	bool
-
-source "net/oplus_score/Kconfig"
-
-source "net/oplus_connectivity_sla/Kconfig"
-
-source "net/oplus_wificapcenter/Kconfig"

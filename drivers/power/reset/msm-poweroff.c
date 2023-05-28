@@ -26,6 +26,7 @@
 #include <linux/input/qpnp-power-on.h>
 #include <linux/of_address.h>
 #include <linux/syscore_ops.h>
+#include <linux/crash_dump.h>
 
 #include <asm/cacheflush.h>
 #include <asm/system_misc.h>
@@ -35,10 +36,7 @@
 #include <soc/qcom/restart.h>
 #include <soc/qcom/watchdog.h>
 #include <soc/qcom/minidump.h>
-#ifdef CONFIG_OPLUS_FEATURE_QCOM_MINIDUMP_ENHANCE
-#include <soc/oplus/oplus_project.h>
-#include <soc/oplus/system/qcom_minidump_enhance.h>
-#endif
+#include "msm-poweroff.h"
 
 #define EMERGENCY_DLOAD_MAGIC1    0x322A4F99
 #define EMERGENCY_DLOAD_MAGIC2    0xC67E4350
@@ -53,9 +51,6 @@
 #define SCM_DLOAD_CMD			0x10
 #define SCM_DLOAD_MINIDUMP		0X20
 #define SCM_DLOAD_BOTHDUMPS	(SCM_DLOAD_MINIDUMP | SCM_DLOAD_FULLDUMP)
-
-/* if open fulldump disable the pmic watchdog */
-void oplus_set_pmicWd_state(int enable);
 
 static int restart_mode;
 static void *restart_reason;
@@ -83,16 +78,7 @@ static bool force_warm_reboot;
 
 static int in_panic;
 static struct kobject dload_kobj;
-static struct kobject dload_kobj;
-#ifndef CONFIG_OPLUS_FEATURE_QCOM_MINIDUMP_ENHANCE
 static int dload_type = SCM_DLOAD_FULLDUMP;
-#else
-#if defined(CONFIG_OPLUS_DEBUG_BUILD)
-int dload_type = SCM_DLOAD_FULLDUMP;
-#else
-int dload_type = SCM_DLOAD_MINIDUMP;
-#endif
-#endif
 static void *dload_mode_addr;
 static void *dload_type_addr;
 static bool dload_mode_enabled;
@@ -101,13 +87,6 @@ static void *emergency_dload_mode_addr;
 static void __iomem *kaslr_imem_addr;
 #endif
 static bool scm_dload_supported;
-#ifdef CONFIG_OPLUS_FEATURE_PANIC_FLUSH
-int get_download_mode(void)
-{
-	return download_mode && (dload_type & SCM_DLOAD_FULLDUMP);
-}
-EXPORT_SYMBOL(get_download_mode);
-#endif
 
 static int dload_set(const char *val, const struct kernel_param *kp);
 /* interface for exporting attributes */
@@ -127,6 +106,11 @@ struct reset_attribute {
 module_param_call(download_mode, dload_set, param_get_int,
 			&download_mode, 0644);
 
+int oem_get_download_mode(void)
+{
+	return download_mode && (dload_type & SCM_DLOAD_FULLDUMP);
+}
+
 static int panic_prep_restart(struct notifier_block *this,
 			      unsigned long event, void *ptr)
 {
@@ -145,7 +129,6 @@ int scm_set_dload_mode(int arg1, int arg2)
 		.args[1] = arg2,
 		.arginfo = SCM_ARGS(2),
 	};
-
 	if (!scm_dload_supported) {
 		if (tcsr_boot_misc_detect)
 			return scm_io_write(tcsr_boot_misc_detect, arg1);
@@ -160,82 +143,55 @@ int scm_set_dload_mode(int arg1, int arg2)
 				&desc);
 }
 
-
-#ifdef OPLUS_BUG_STABILITY
-bool is_fulldump_enable(void)
-{
-	return download_mode && (dload_type & SCM_DLOAD_FULLDUMP);
-}
-
-void oplus_switch_fulldump(int on)
-{
-	int ret;
-
-	if (dload_mode_addr) {
-		__raw_writel(0xE47B337D, dload_mode_addr);
-		__raw_writel(0xCE14091A,
-			dload_mode_addr + sizeof(unsigned int));
-		mb();
-	}
-	if(on){
-		ret = scm_set_dload_mode(SCM_DLOAD_FULLDUMP, 0);
-		if (ret)
-			pr_err("Failed to set secure DLOAD mode: %d\n", ret);
-		dload_type = SCM_DLOAD_FULLDUMP;
-	}else{
-		ret = scm_set_dload_mode(SCM_DLOAD_MINIDUMP, 0);
-		if (ret)
-			pr_err("Failed to set secure DLOAD mode: %d\n", ret);
-		dload_type = SCM_DLOAD_MINIDUMP;
-	}
-
-	if(dload_type == SCM_DLOAD_MINIDUMP)
-		__raw_writel(EMMC_DLOAD_TYPE, dload_type_addr);
-	else
-		__raw_writel(0, dload_type_addr);
-	dload_mode_enabled = on;
-}
-EXPORT_SYMBOL(oplus_switch_fulldump);
-#endif /* OPLUS_BUG_STABILITY */
-
 static void set_dload_mode(int on)
 {
 	int ret;
+	u64 read_ret;
+	pr_info("set_dload_mode %s\n", on ? "ON" : "OFF");
 
+	pr_err("[MDM] on [%d] dload_mode_addr [%p]\n", on, dload_mode_addr);
 	if (dload_mode_addr) {
-		__raw_writel(on ? 0xE47B337D : 0, dload_mode_addr);
-		__raw_writel(on ? 0xCE14091A : 0,
-		       dload_mode_addr + sizeof(unsigned int));
+		pr_err("[MDM] modem_5G_panic is [%d]\n", modem_5G_panic);
+		if (modem_5G_panic == true) {
+			__raw_writel(on ? 0xABCDABCD : 0, dload_mode_addr);
+			pr_err("[MDM] modem_5G_panic enter\n");
+		} else {
+			__raw_writel(on ? 0x0 : 0, dload_mode_addr);
+		}
 		/* Make sure the download cookie is updated */
 		mb();
+		read_ret = __raw_readl(dload_mode_addr);
+		pr_err("[MDM] read_ret is [0x%X]\n", read_ret);
 	}
 
 	ret = scm_set_dload_mode(on ? dload_type : 0, 0);
 	if (ret)
-		pr_err("Failed to set secure DLOAD mode: %d\n", ret);
-
-#ifdef CONFIG_OPLUS_FEATURE_QCOM_MINIDUMP_ENHANCE
-	if(dload_type == SCM_DLOAD_MINIDUMP)
-		__raw_writel(EMMC_DLOAD_TYPE, dload_type_addr);
-	else
-		__raw_writel(0, dload_type_addr);
-#endif /* CONFIG_OPLUS_FEATURE_QCOM_MINIDUMP_ENHANCE */
+		pr_err("[MDM] Failed to set secure DLOAD mode: %d\n", ret);
 
 	dload_mode_enabled = on;
 }
+
+/* [OSP-3675]: ext4 fsync */
+int get_download_mode(void)
+{
+	return download_mode && (dload_type & SCM_DLOAD_FULLDUMP);
+}
+EXPORT_SYMBOL(get_download_mode);
 
 static bool get_dload_mode(void)
 {
 	return dload_mode_enabled;
 }
 
-#ifdef OPLUS_FEATURE_ADSP_RECOVERY
-bool oem_is_fulldump(void)
+void oem_force_minidump_mode(void)
 {
-	return download_mode && (dload_type & SCM_DLOAD_FULLDUMP);
+	if (dload_type == SCM_DLOAD_FULLDUMP) {
+		pr_err("force minidump mode\n");
+		dload_type = SCM_DLOAD_MINIDUMP;
+		set_dload_mode(dload_type);
+		__raw_writel(EMMC_DLOAD_TYPE, dload_type_addr);
+	}
 }
-EXPORT_SYMBOL(oem_is_fulldump);
-#endif /* OPLUS_FEATURE_ADSP_RECOVERY */
 
 static void enable_emergency_dload_mode(void)
 {
@@ -254,11 +210,11 @@ static void enable_emergency_dload_mode(void)
 		/* Need disable the pmic wdt, then the emergency dload mode
 		 * will not auto reset.
 		 */
+		qpnp_pon_wd_config(0);
 		/* Make sure all the cookied are flushed to memory */
 		mb();
 	}
-    
-    qpnp_pon_wd_config(0);
+
 	ret = scm_set_dload_mode(SCM_EDLOAD_MODE, 0);
 	if (ret)
 		pr_err("Failed to set secure EDLOAD mode: %d\n", ret);
@@ -368,8 +324,8 @@ static void msm_restart_prepare(const char *cmd)
 	 * Write download mode flags if restart_mode says so
 	 * Kill download mode if master-kill switch is set
 	 */
-
-	set_dload_mode(download_mode &&
+	if (!is_kdump_kernel())
+		set_dload_mode(download_mode &&
 			(in_panic || restart_mode == RESTART_DLOAD));
 #endif
 
@@ -383,21 +339,7 @@ static void msm_restart_prepare(const char *cmd)
 		need_warm_reset = (get_dload_mode() ||
 				(cmd != NULL && cmd[0] != '\0'));
 	}
-#ifdef OPLUS_BUG_STABILITY 
-	if (in_panic){
-		//warm reset
-		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
-		qpnp_pon_set_restart_reason(
-					PON_RESTART_REASON_KERNEL);
-		flush_cache_all();
 
-		/*outer_flush_all is not supported by 64bit kernel*/
-#ifndef CONFIG_ARM64
-		outer_flush_all();
-#endif
-		return;
-	}
-#endif /* OPLUS_BUG_STABILITY */
 	if (force_warm_reboot)
 		pr_info("Forcing a warm reset of the system\n");
 
@@ -432,22 +374,30 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_KEYS_CLEAR);
 			__raw_writel(0x7766550a, restart_reason);
-		#ifdef OPLUS_FEATURE_AGINGTEST
-		} else if(!strcmp(cmd, "sbllowmemtest")){
+		} else if (!strcmp(cmd, "sbllowmemtest")) {
+			pr_info("[op aging mem test] lunch ddr sbllowmemtest!!comm: %s, pid: %d\n"
+				, current->comm, current->pid);
 			qpnp_pon_set_restart_reason(
 					PON_RESTART_REASON_SBL_DDR_CUS);
 			__raw_writel(0x7766550b, restart_reason);
-		}else if (!strcmp(cmd, "sblmemtest")){//oplus factory aging test
-			printk("[%s:%d] lunch ddr test!!\n", current->comm, current->pid);
+		} else if (!strcmp(cmd, "sblmemtest")) {//op factory aging test
+			pr_info("[op aging mem test] lunch ddr sblmemtest!!comm: %s, pid: %d\n"
+				, current->comm, current->pid);
 			qpnp_pon_set_restart_reason(
 					PON_RESTART_REASON_SBL_DDRTEST);
-			__raw_writel(0x7766550b, restart_reason);
-		} else if(!strcmp(cmd, "usermemaging")){
-			printk("[%s:%d] lunch user memory test!!\n", current->comm, current->pid);
+		__raw_writel(0x7766550b, restart_reason);
+		} else if (!strcmp(cmd, "usermemaging")) {
+			pr_info("[op aging mem test] lunch ddr usermemaging!!comm: %s, pid: %d\n"
+				, current->comm, current->pid);
 			qpnp_pon_set_restart_reason(
 					PON_RESTART_REASON_MEM_AGING);
 			__raw_writel(0x7766550b, restart_reason);
-		#endif
+		} else if (!strncmp(cmd, "rf", 2)) {
+			qpnp_pon_set_restart_reason(PON_RESTART_REASON_RF);
+			__raw_writel(RF_MODE, restart_reason);
+		} else if (!strncmp(cmd, "ftm", 3)) {
+			qpnp_pon_set_restart_reason(PON_RESTART_REASON_FACTORY);
+			__raw_writel(FACTORY_MODE, restart_reason);
 		} else if (!strncmp(cmd, "oem-", 4)) {
 			unsigned long code;
 			int ret;
@@ -458,55 +408,11 @@ static void msm_restart_prepare(const char *cmd)
 					     restart_reason);
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
-		} 
-#ifdef VENDOR_EDIT
-		else if (!strncmp(cmd, "rf", 2)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_RF);
-		} else if (!strncmp(cmd, "wlan",4)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_WLAN);
-		#ifdef USE_MOS_MODE
-		} else if (!strncmp(cmd, "mos", 3)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_MOS);
-		#endif
-		} else if (!strncmp(cmd, "ftm", 3)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_FACTORY);
-		} else if (!strncmp(cmd, "kernel", 6)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_KERNEL);
-		} else if (!strncmp(cmd, "modem", 5)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_MODEM);
-		} else if (!strncmp(cmd, "android", 7)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_ANDROID);
-		} else if (!strncmp(cmd, "silence", 7)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_SILENCE);
-		} else if (!strncmp(cmd, "sau", 3)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_SAU);
-		} else if (!strncmp(cmd, "safe", 4)) {
-			qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_SAFE);
-		} else if (!strncmp(cmd, "novib", 5)) {
-			qpnp_pon_set_restart_reason(
-                                PON_RESTART_REASON_BOOT_NO_VIBRATION);
-		}
-#endif
-		else {
+		} else {
 			__raw_writel(0x77665501, restart_reason);
 		}
 	}
-#ifdef VENDOR_EDIT
-	else {
-		qpnp_pon_set_restart_reason(
-				PON_RESTART_REASON_NORMAL);
-	}
-#endif
+
 	flush_cache_all();
 
 	/*outer_flush_all is not supported by 64bit kernel*/
@@ -688,9 +594,6 @@ static size_t store_dload_mode(struct kobject *kobj, struct attribute *attr,
 		return -EINVAL;
 	}
 
-	if(dload_type == SCM_DLOAD_FULLDUMP)
-		oplus_set_pmicWd_state(0);
-
 	mutex_lock(&tcsr_lock);
 	/*Overwrite TCSR reg*/
 	set_dload_mode(dload_type);
@@ -740,17 +643,6 @@ static int msm_restart_probe(struct platform_device *pdev)
 	struct resource *mem;
 	struct device_node *np;
 	int ret = 0;
-	
-#ifdef CONFIG_OPLUS_FEATURE_QCOM_MINIDUMP_ENHANCE
-#ifdef CONFIG_OPLUS_USER_BUILD
-	if (get_eng_version() == AGING)
-		dload_type = SCM_DLOAD_FULLDUMP;
-	else
-		dload_type = SCM_DLOAD_MINIDUMP;
-#else
-		dload_type = SCM_DLOAD_FULLDUMP;
-#endif
-#endif
 
 #ifdef CONFIG_QCOM_DLOAD_MODE
 	if (scm_is_call_available(SCM_SVC_BOOT, SCM_DLOAD_CMD) > 0)
@@ -858,8 +750,8 @@ skip_sysfs_create:
 
 	if (scm_is_call_available(SCM_SVC_PWR, SCM_IO_DEASSERT_PS_HOLD) > 0)
 		scm_deassert_ps_hold_supported = true;
-
-	set_dload_mode(download_mode);
+	if (!is_kdump_kernel())
+		set_dload_mode(download_mode);
 	if (!download_mode)
 		scm_disable_sdi();
 

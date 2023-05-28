@@ -48,9 +48,17 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
 
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-#include <linux/sched_assist/sched_assist_common.h>
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
+#ifdef CONFIG_ONEPLUS_HEALTHINFO
+#include <linux/oem/oneplus_healthinfo.h>
+#endif
+
+#ifdef CONFIG_HOUSTON
+#include <oneplus/houston/houston_helper.h>
+#endif
+
+#ifdef CONFIG_IM
+#include <linux/oem/im.h>
+#endif
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
@@ -820,6 +828,11 @@ void deactivate_task(struct rq *rq, struct task_struct *p, int flags)
 		clear_ed_task(p, rq);
 
 	dequeue_task(rq, p, flags);
+
+#if defined(CONFIG_CONTROL_CENTER) && defined(CONFIG_IM)
+		if (unlikely(im_ux(p)))
+			restore_user_nice_safe(p);
+#endif
 }
 
 /*
@@ -904,13 +917,14 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 {
 	const struct sched_class *class;
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-//#ifdef CONFIG_UXCHAIN_V2
-	u64 wallclock = sched_clock();
 
-	if (sysctl_uxchain_v2 &&
-		wallclock - rq->curr->get_mmlock_ts < PREEMPT_DISABLE_RWSEM &&
-		rq->curr->get_mmlock &&
+#ifdef CONFIG_UXCHAIN
+	u64 wallclock = sched_ktime_clock();
+
+	if (sysctl_uxchain_enabled &&
+		(sysctl_launcher_boost_enabled ||
+		wallclock - rq->curr->oncpu_time < PREEMPT_DISABLE_NS) &&
+		(rq->curr->static_ux || rq->curr->dynamic_ux) &&
 		!(p->flags & PF_WQ_WORKER) && !task_has_rt_policy(p))
 		return;
 #endif
@@ -1950,14 +1964,6 @@ static void ttwu_queue(struct task_struct *p, int cpu, int wake_flags)
 	rq_unlock(rq, &rf);
 }
 
-#ifdef CONFIG_OPLUS_FEATURE_RT_INFO
-rt_info_handler rt_handler = NULL;
-void register_rt_info_handler(rt_info_handler h) {
-    rt_handler = h;
-    pr_info("Add a rt_info handler\n");
-}
-#endif
-
 /*
  * Notes on Program-Order guarantees on SMP systems.
  *
@@ -2116,11 +2122,6 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags,
 		goto out;
 
 	trace_sched_waking(p);
-
-#ifdef CONFIG_OPLUS_FEATURE_RT_INFO
-	if (rt_handler != NULL)
-		rt_handler(p);
-#endif
 
 	/* We're going to change ->state: */
 	success = 1;
@@ -2510,6 +2511,8 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	 */
 	p->prio = current->normal_prio;
 
+	p->compensate_need = 0;
+
 	/*
 	 * Revert to default priority/policy on fork if requested.
 	 */
@@ -2517,10 +2520,16 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 		if (task_has_dl_policy(p) || task_has_rt_policy(p)) {
 			p->policy = SCHED_NORMAL;
 			p->static_prio = NICE_TO_PRIO(0);
+#ifdef CONFIG_CONTROL_CENTER
+			p->cached_prio = p->static_prio;
+#endif
 			p->rt_priority = 0;
 		} else if (PRIO_TO_NICE(p->static_prio) < 0)
+#ifdef CONFIG_CONTROL_CENTER
+			p->cached_prio = p->static_prio = NICE_TO_PRIO(0);
+#else
 			p->static_prio = NICE_TO_PRIO(0);
-
+#endif
 		p->prio = p->normal_prio = __normal_prio(p);
 		set_load_weight(p);
 
@@ -2608,6 +2617,7 @@ void wake_up_new_task(struct task_struct *p)
 	raw_spin_lock_irqsave(&p->pi_lock, rf.flags);
 
 	p->state = TASK_RUNNING;
+
 #ifdef CONFIG_SMP
 	/*
 	 * Fork balancing, do it here and not earlier because:
@@ -3169,69 +3179,10 @@ unsigned long long task_sched_runtime(struct task_struct *p)
 
 unsigned int capacity_margin_freq = 1280; /* ~20% margin */
 
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-extern int sysctl_frame_rate;
-extern unsigned int sched_ravg_window;
-extern bool ux_task_misfit(struct task_struct *p, int cpu);
-u64 ux_task_load[NR_CPUS] = {0};
-u64 ux_load_ts[NR_CPUS] = {0};
-static u64 calc_freq_ux_load(struct task_struct *p, u64 wallclock)
-{
-	unsigned int maxtime = 0, factor = 0;
-	unsigned int window_size = sched_ravg_window / NSEC_PER_MSEC;
-	u64 timeline = 0, freq_exec_load = 0, freq_ravg_load = 0;
-	u64 wakeclock = p->last_wake_ts;
-
-	if (wallclock < wakeclock)
-		return 0;
-
-	switch (sysctl_frame_rate) {
-		case 60:
-		case 90:
-			maxtime = 5;
-			break;
-		case 120:
-			maxtime = 4;
-			break;
-		default:
-			return 0;
-	}
-
-	timeline = wallclock - wakeclock;
-	factor = window_size / maxtime;
-	freq_exec_load = timeline * factor;
-
-	if (freq_exec_load > sched_ravg_window)
-		freq_exec_load = sched_ravg_window;
-
-	freq_ravg_load = (p->ravg.prev_window + p->ravg.curr_window) << 1;
-	if (freq_ravg_load > sched_ravg_window)
-		freq_ravg_load = sched_ravg_window;
-
-	return max(freq_exec_load, freq_ravg_load);
-}
-#endif
-
 /*
  * This function gets called by the timer code, with HZ frequency.
  * We call it with interrupts disabled.
  */
-void adjust_sched_assist_input_ctrl(void){
-	if (!sysctl_input_boost_enabled)
-		return;
-	if(sysctl_slide_boost_enabled){
-		sysctl_input_boost_enabled = 0;
-		sched_assist_input_boost_duration = 0;
-		return;
-	}
-	if(jiffies_to_msecs(jiffies) < sched_assist_input_boost_duration){
-		return;
-	}
-	else{
-                sched_assist_input_boost_duration = 0;
-                sysctl_input_boost_enabled = 0;
-	}
-}
 void scheduler_tick(void)
 {
 	int cpu = smp_processor_id();
@@ -3261,24 +3212,7 @@ void scheduler_tick(void)
 	early_notif = early_detection_notify(rq, wallclock);
 	if (early_notif)
 		flag = SCHED_CPUFREQ_WALT | SCHED_CPUFREQ_EARLY_DET;
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-	adjust_sched_assist_input_ctrl();
-	if (sched_assist_scene(SA_SLIDE)) {
-		if(rq->curr && is_heavy_ux_task(rq->curr) && !ux_task_misfit(rq->curr, cpu)) {
-			ux_task_load[cpu] = calc_freq_ux_load(rq->curr, wallclock);
-			ux_load_ts[cpu] = wallclock;
-			flag |= (SCHED_CPUFREQ_WALT | SCHED_CPUFREQ_BOOST);
-		}
-		else if (ux_task_load[cpu] != 0) {
-			ux_task_load[cpu] = 0;
-			ux_load_ts[cpu] = wallclock;
-			flag |= (SCHED_CPUFREQ_WALT | SCHED_CPUFREQ_RESET);
-		}
-	} else {
-		ux_task_load[cpu] = 0;
-		ux_load_ts[cpu] = 0;
-	}
-#endif
+
 	cpufreq_update_util(rq, flag);
 	rq_unlock(rq, &rf);
 
@@ -3648,10 +3582,6 @@ static void __sched notrace __schedule(bool preempt)
 		switch_count = &prev->nvcsw;
 	}
 
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-	prev->enqueue_time = rq->clock;
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
-
 	next = pick_next_task(rq, prev, &rf);
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();
@@ -3682,8 +3612,19 @@ static void __sched notrace __schedule(bool preempt)
 		 */
 		++*switch_count;
 
+#ifdef CONFIG_ONEPLUS_HEALTHINFO
+		if (prev->sched_class == &rt_sched_class && ohm_rtinfo_ctrl == true)
+			rt_thresh_times_record(prev, cpu);
+#endif
+#ifdef CONFIG_UXCHAIN
+		prev->oncpu_time = 0;
+		next->oncpu_time = wallclock;
+#endif
 		trace_sched_switch(preempt, prev, next);
 
+#ifdef CONFIG_HOUSTON
+		ht_sched_switch_update(prev, next);
+#endif
 		/* Also unlocks the rq: */
 		rq = context_switch(rq, prev, next, &rf);
 	} else {
@@ -4036,7 +3977,8 @@ void rt_mutex_setprio(struct task_struct *p, struct task_struct *pi_task)
 	 */
 	if (dl_prio(prio)) {
 		if (!dl_prio(p->normal_prio) ||
-		    (pi_task && dl_entity_preempt(&pi_task->dl, &p->dl))) {
+		    (pi_task && dl_prio(pi_task->prio) &&
+		     dl_entity_preempt(&pi_task->dl, &p->dl))) {
 			p->dl.dl_boosted = 1;
 			queue_flag |= ENQUEUE_REPLENISH;
 		} else
@@ -4079,7 +4021,34 @@ static inline int rt_effective_prio(struct task_struct *p, int prio)
 }
 #endif
 
-void set_user_nice(struct task_struct *p, long nice)
+#ifdef CONFIG_CONTROL_CENTER
+void restore_user_nice_safe(struct task_struct *p)
+{
+	long nice = PRIO_TO_NICE(p->cached_prio);
+
+	if (rt_prio(p->prio))
+		return;
+
+	if (task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE)
+		return;
+
+	if (task_on_rq_queued(p))
+		return;
+
+	if (task_current(task_rq(p), p))
+		return;
+
+	if (!time_after64(get_jiffies_64(), p->nice_effect_ts))
+		return;
+
+	p->static_prio = NICE_TO_PRIO(nice);
+	set_load_weight(p);
+	p->prio = effective_prio(p);
+
+	p->nice_effect_ts = ULLONG_MAX;
+}
+
+void set_user_nice_no_cache(struct task_struct *p, long nice)
 {
 	bool queued, running;
 	int old_prio, delta;
@@ -4088,6 +4057,7 @@ void set_user_nice(struct task_struct *p, long nice)
 
 	if (task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE)
 		return;
+
 	/*
 	 * We have to be careful, if called from sys_setpriority(),
 	 * the task might be in the middle of scheduling on another CPU.
@@ -4113,6 +4083,67 @@ void set_user_nice(struct task_struct *p, long nice)
 		put_prev_task(rq, p);
 
 	p->static_prio = NICE_TO_PRIO(nice);
+	set_load_weight(p);
+	old_prio = p->prio;
+	p->prio = effective_prio(p);
+	delta = p->prio - old_prio;
+
+	if (queued) {
+		enqueue_task(rq, p, ENQUEUE_RESTORE | ENQUEUE_NOCLOCK);
+		if (delta < 0 || (delta > 0 && task_running(rq, p)))
+			resched_curr(rq);
+	}
+	if (running)
+		set_curr_task(rq, p);
+out_unlock:
+	task_rq_unlock(rq, p, &rf);
+}
+EXPORT_SYMBOL(set_user_nice_no_cache);
+#endif
+
+void set_user_nice(struct task_struct *p, long nice)
+{
+	bool queued, running;
+	int old_prio, delta;
+	struct rq_flags rf;
+	struct rq *rq;
+
+#ifdef CONFIG_CONTROL_CENTER
+	if (task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE) {
+		p->cached_prio = p->static_prio;
+		return;
+	}
+#else
+	if (task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE)
+		return;
+#endif
+
+	/*
+	 * We have to be careful, if called from sys_setpriority(),
+	 * the task might be in the middle of scheduling on another CPU.
+	 */
+	rq = task_rq_lock(p, &rf);
+	update_rq_clock(rq);
+
+
+	if (task_has_dl_policy(p) || task_has_rt_policy(p)) {
+		p->static_prio = NICE_TO_PRIO(nice);
+#ifdef CONFIG_CONTROL_CENTER
+		p->cached_prio = p->static_prio;
+#endif
+		goto out_unlock;
+	}
+	queued = task_on_rq_queued(p);
+	running = task_current(rq, p);
+	if (queued)
+		dequeue_task(rq, p, DEQUEUE_SAVE | DEQUEUE_NOCLOCK);
+	if (running)
+		put_prev_task(rq, p);
+
+	p->static_prio = NICE_TO_PRIO(nice);
+#ifdef CONFIG_CONTROL_CENTER
+	p->cached_prio = p->static_prio;
+#endif
 	set_load_weight(p);
 	old_prio = p->prio;
 	p->prio = effective_prio(p);
@@ -4261,7 +4292,12 @@ static void __setscheduler_params(struct task_struct *p,
 	if (dl_policy(policy))
 		__setparam_dl(p, attr);
 	else if (fair_policy(policy))
+#ifdef CONFIG_CONTROL_CENTER
+		p->cached_prio =
+			p->static_prio = NICE_TO_PRIO(attr->sched_nice);
+#else
 		p->static_prio = NICE_TO_PRIO(attr->sched_nice);
+#endif
 
 	/*
 	 * __sched_setscheduler() ensures attr->sched_priority == 0 when
@@ -6449,9 +6485,6 @@ void __init sched_init_smp(void)
 	sched_init_granularity();
 	free_cpumask_var(non_isolated_cpus);
 
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-	ux_init_cpu_data();
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
 	init_sched_rt_class();
 	init_sched_dl_class();
 
@@ -6571,9 +6604,6 @@ void __init sched_init(void)
 		init_cfs_rq(&rq->cfs);
 		init_rt_rq(&rq->rt);
 		init_dl_rq(&rq->dl);
-#ifdef OPLUS_FEATURE_SCHED_ASSIST
-		ux_init_rq_data(rq);
-#endif /* OPLUS_FEATURE_SCHED_ASSIST */
 #ifdef CONFIG_FAIR_GROUP_SCHED
 		root_task_group.shares = ROOT_TASK_GROUP_LOAD;
 		INIT_LIST_HEAD(&rq->leaf_cfs_rq_list);
@@ -7692,21 +7722,3 @@ void sched_exit(struct task_struct *p)
 #endif /* CONFIG_SCHED_WALT */
 
 __read_mostly bool sched_predl = 1;
-#ifdef OPLUS_BUG_STABILITY
-struct task_struct *oplus_get_cpu_task(int cpu)
-{
-	return cpu_curr(cpu);
-}
-#endif
-
-#ifdef CONFIG_KSWAPD_UNBIND_MAX_CPU
-void upate_kswapd_unbind_cpu(void)
-{
-    struct root_domain *rd = NULL;
-    rcu_read_lock();
-    rd = cpu_rq(smp_processor_id())->rd;
-    if (rd->mid_cap_orig_cpu != -1 && rd->max_cap_orig_cpu != -1)
-        kswapd_unbind_cpu = rd->max_cap_orig_cpu;
-    rcu_read_unlock();
-}
-#endif

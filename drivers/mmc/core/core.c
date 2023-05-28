@@ -515,7 +515,7 @@ static int mmc_devfreq_set_target(struct device *dev,
 		*freq, current->comm);
 
 	spin_lock_bh(&clk_scaling->lock);
-	if (clk_scaling->target_freq == *freq ||
+	if (clk_scaling->curr_freq == *freq ||
 		clk_scaling->skip_clk_scale_freq_update) {
 		spin_unlock_bh(&clk_scaling->lock);
 		goto out;
@@ -4428,11 +4428,7 @@ void mmc_stop_host(struct mmc_host *host)
 	}
 
 	host->rescan_disable = 1;
-#ifndef VENDOR_EDIT 
 	cancel_delayed_work_sync(&host->detect);
-#else
-	cancel_delayed_work(&host->detect);
-#endif
 
 	/* clear pm flags now and let card drivers set them as needed */
 	host->pm_flags = 0;

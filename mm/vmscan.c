@@ -11,10 +11,12 @@
  *  Zone aware kswapd started 02/00, Kanoj Sarcar (kanoj@sgi.com).
  *  Multiqueue VM started 5.8.00, Rik van Riel.
  */
+
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/mm.h>
 #include <linux/sched/mm.h>
+#include <linux/sched/debug.h>
 #include <linux/module.h>
 #include <linux/gfp.h>
 #include <linux/kernel_stat.h>
@@ -56,24 +58,11 @@
 #include <linux/swapops.h>
 #include <linux/balloon_compaction.h>
 
-#if defined(OPLUS_FEATURE_PROCESS_RECLAIM) && defined(CONFIG_PROCESS_RECLAIM_ENHANCE)
-/*
- * collect interrupt doing time during process reclaim, only effect in age test
- */
-#include <linux/process_mm_reclaim.h>
-#endif
-
 #include "internal.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/vmscan.h>
 
-#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_FG_TASK_UID)
-#include <linux/oplus_healthinfo/oplus_fg.h>
-#endif /*OPLUS_FEATURE_ZRAM_OPT*/
-#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
-#include <linux/multi_kswapd.h>
-#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
 struct scan_control {
 	/* How many pages shrink_list() should reclaim */
 	unsigned long nr_to_reclaim;
@@ -124,6 +113,11 @@ struct scan_control {
 	/* One of the zones is ready for compaction */
 	unsigned int compaction_ready:1;
 
+#ifdef CONFIG_MEMPLUS
+	/* 1: swap to zram, 0: swap to file */
+	unsigned int swp_bdv_type:1;
+#endif
+
 	/* Incremented by the number of inactive pages that were scanned */
 	unsigned long nr_scanned;
 
@@ -136,10 +130,6 @@ struct scan_control {
 	 * on memory until last task zap it.
 	 */
 	struct vm_area_struct *target_vma;
-
-#if defined(OPLUS_FEATURE_PROCESS_RECLAIM) && defined(CONFIG_PROCESS_RECLAIM_ENHANCE)
-	struct mm_walk *walk;
-#endif
 };
 
 #ifdef ARCH_HAS_PREFETCH
@@ -170,24 +160,25 @@ struct scan_control {
 #define prefetchw_prev_lru_page(_page, _base, _field) do { } while (0)
 #endif
 
+/* set direct swapiness rate ,higher means more swap */
+#ifdef CONFIG_DIRECT_SWAPPINESS
+int vm_swappiness = 100;
+int vm_direct_swapiness = 60;
+#else
 /*
  * From 0 .. 100.  Higher means more swappy.
  */
 int vm_swappiness = 60;
-
-#ifdef CONFIG_DAYAMIC_TUNNING_SWAPPINESS
-int vm_swappiness_threshold1 = 0;
-int vm_swappiness_threshold2 = 0;
-int swappiness_threshold1_size = 0;
-int swappiness_threshold2_size = 0;
 #endif
 
-#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
 /*
- * Direct reclaim swappiness, exptct 0 - 60. Higher means more swappy and slower.
+ * time for kswapd to breath between each scanning loop
  */
-int direct_vm_swappiness = 60;
-#endif /*OPLUS_FEATURE_ZRAM_OPT*/
+unsigned int vm_breath_period __read_mostly = 4000;
+/*
+ * default adj for kswapd to perform lazy-reclaim
+ */
+int vm_breath_priority __read_mostly = 500;
 /*
  * The total number of pages which are beyond the high watermark within all
  * zones.
@@ -1023,10 +1014,6 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		enum page_references references = PAGEREF_RECLAIM;
 		bool dirty, writeback;
 
-#if defined(OPLUS_FEATURE_PROCESS_RECLAIM) && defined(CONFIG_PROCESS_RECLAIM_ENHANCE)
-		if (sc->walk && is_reclaim_should_cancel(sc->walk))
-			break;
-#endif
 		cond_resched();
 
 		page = lru_to_page(page_list);
@@ -1196,6 +1183,9 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 								    page_list))
 						goto activate_locked;
 				}
+
+				memplus_set_private(page, sc->swp_bdv_type);
+
 				if (!add_to_swap(page)) {
 					if (!PageTransHuge(page))
 						goto activate_locked;
@@ -1452,14 +1442,10 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 	return ret;
 }
 
-#if defined(CONFIG_NANDSWAP)
-unsigned long nswap_reclaim_page_list(struct list_head *page_list,
-					struct vm_area_struct *vma, bool scan)
+unsigned long coretech_reclaim_pagelist(struct list_head *page_list,
+	struct vm_area_struct *vma, void *sc)
 {
-	unsigned long nr_reclaimed;
-	unsigned long nr_scan = 0;
-	struct page *page;
-	struct scan_control sc = {
+	struct scan_control sc_t = {
 		.gfp_mask = GFP_KERNEL,
 		.priority = DEF_PRIORITY,
 		.may_writepage = 1,
@@ -1468,35 +1454,34 @@ unsigned long nswap_reclaim_page_list(struct list_head *page_list,
 		.target_vma = vma,
 	};
 
+	unsigned long nr_reclaimed;
+	struct page *page;
+
+	if (!sc)
+		sc = &sc_t;
+
 	list_for_each_entry(page, page_list, lru) {
 		ClearPageActive(page);
 	}
 
-	nr_reclaimed = shrink_page_list(page_list, NULL, &sc,
-			TTU_IGNORE_ACCESS, NULL, true);
+	nr_reclaimed = shrink_page_list(page_list, NULL,
+		(struct scan_control *)sc,
+		TTU_IGNORE_ACCESS, NULL, true);
 
 	while (!list_empty(page_list)) {
 		page = lru_to_page(page_list);
-		if (PageSwapCache(page) && !PageDirty(page))
-			nr_scan++;
 		list_del(&page->lru);
 		dec_node_page_state(page, NR_ISOLATED_ANON +
-				page_is_file_cache(page));
+			page_is_file_cache(page));
 		putback_lru_page(page);
 	}
 
-	return scan ? nr_scan : nr_reclaimed;
+	return nr_reclaimed;
 }
-#endif
 
-#ifdef CONFIG_PROCESS_RECLAIM
-#if defined(OPLUS_FEATURE_PROCESS_RECLAIM) && defined(CONFIG_PROCESS_RECLAIM_ENHANCE)
-unsigned long reclaim_pages_from_list(struct list_head *page_list,
-			struct vm_area_struct *vma, struct mm_walk *walk)
-#else
-unsigned long reclaim_pages_from_list(struct list_head *page_list,
-					struct vm_area_struct *vma)
-#endif
+#ifdef CONFIG_MEMPLUS
+unsigned long swapout_to_zram(struct list_head *page_list,
+	struct vm_area_struct *vma)
 {
 	struct scan_control sc = {
 		.gfp_mask = GFP_KERNEL,
@@ -1505,9 +1490,65 @@ unsigned long reclaim_pages_from_list(struct list_head *page_list,
 		.may_unmap = 1,
 		.may_swap = 1,
 		.target_vma = vma,
-#if defined(OPLUS_FEATURE_PROCESS_RECLAIM) && defined(CONFIG_PROCESS_RECLAIM_ENHANCE)
-		.walk = walk,
+		.swp_bdv_type = 1,
+	};
+
+	return coretech_reclaim_pagelist(page_list, vma, &sc);
+}
+
+unsigned long swapout_to_disk(struct list_head *page_list,
+	struct vm_area_struct *vma)
+{
+	struct scan_control sc = {
+		.gfp_mask = GFP_KERNEL,
+		.priority = DEF_PRIORITY,
+		.may_writepage = 1,
+		.may_unmap = 1,
+		.may_swap = 1,
+		.target_vma = vma,
+		.swp_bdv_type = 0,
+	};
+
+	return coretech_reclaim_pagelist(page_list, vma, &sc);
+}
 #endif
+
+static void smart_boost_reclaim_pages(struct lruvec *lruvec,
+					struct pglist_data *pgdat,
+					struct scan_control *sc)
+{
+	LIST_HEAD(page_list);
+	unsigned long nr_isolate = 0;
+	struct page *page;
+
+	nr_isolate = smb_isolate_list_or_putbcak(&page_list,
+		lruvec, pgdat, sc->priority,
+		(sc->nr_reclaimed > sc->nr_to_reclaim));
+	if (!nr_isolate)
+		return;
+
+	sc->nr_reclaimed += shrink_page_list(&page_list, pgdat, sc,
+			TTU_IGNORE_ACCESS, NULL, true);
+
+	while (!list_empty(&page_list)) {
+		page = lru_to_page(&page_list);
+		list_del(&page->lru);
+		putback_lru_page(page);
+	}
+}
+
+
+#ifdef CONFIG_PROCESS_RECLAIM
+unsigned long reclaim_pages_from_list(struct list_head *page_list,
+					struct vm_area_struct *vma)
+{
+	struct scan_control sc = {
+		.gfp_mask = GFP_KERNEL,
+		.priority = DEF_PRIORITY,
+		.may_writepage = 1,
+		.may_unmap = 1,
+		.may_swap = 1,
+		.target_vma = vma,
 	};
 
 	unsigned long nr_reclaimed;
@@ -1687,6 +1728,13 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		 * pages, triggering a premature OOM.
 		 */
 		scan++;
+
+		if (memplus_check_isolate_page(page) &&
+				(BIT(lru) & LRU_ALL_ANON)) {
+			list_move(&page->lru, src);
+			continue;
+		}
+
 		switch (__isolate_lru_page(page, mode)) {
 		case 0:
 			nr_pages = hpage_nr_pages(page);
@@ -1761,15 +1809,7 @@ int isolate_lru_page(struct page *page)
 	int ret = -EBUSY;
 
 	VM_BUG_ON_PAGE(!page_count(page), page);
-#if defined(OPLUS_FEATURE_PROCESS_RECLAIM) && defined(CONFIG_PROCESS_RECLAIM_ENHANCE)
-	/* 
-	 * Because process reclaim is doing page by
-	 * page, so there many compound pages are relcaimed, so too many warning msg on this case. 
-         */
-	WARN_RATELIMIT((!current_is_reclaimer() && PageTail(page)), "trying to isolate tail page");
-#else
 	WARN_RATELIMIT(PageTail(page), "trying to isolate tail page");
-#endif
 
 	if (PageLRU(page)) {
 		struct zone *zone = page_zone(page);
@@ -1916,14 +1956,6 @@ putback_inactive_pages(struct lruvec *lruvec, struct list_head *page_list)
  */
 static int current_may_throttle(void)
 {
-#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
-	if ((current->signal->oom_score_adj < 0)
-#ifdef CONFIG_FG_TASK_UID
-		|| is_fg(current_uid().val)
-#endif
-	   )
-		return 0;
-#endif /*OPLUS_FEATURE_ZRAM_OPT*/
 	return !(current->flags & PF_LESS_THROTTLE) ||
 		current->backing_dev_info == NULL ||
 		bdi_write_congested(current->backing_dev_info);
@@ -2126,6 +2158,7 @@ static unsigned move_active_pages_to_lru(struct lruvec *lruvec,
 		page = lru_to_page(list);
 		lruvec = mem_cgroup_page_lruvec(page, pgdat);
 
+		memplus_page_to_lru(lru, page);
 		VM_BUG_ON_PAGE(PageLRU(page), page);
 		SetPageLRU(page);
 
@@ -2258,6 +2291,7 @@ static void shrink_active_list(unsigned long nr_to_scan,
 	free_hot_cold_page_list(&l_hold, true);
 	trace_mm_vmscan_lru_shrink_active(pgdat->node_id, nr_taken, nr_activate,
 			nr_deactivate, nr_rotated, sc->priority, file);
+	smart_boost_reclaim_pages(lruvec, pgdat, sc);
 }
 
 /*
@@ -2306,6 +2340,11 @@ static bool inactive_list_is_low(struct lruvec *lruvec, bool file,
 	if (!file && !total_swap_pages)
 		return false;
 
+	if (!file) {
+		inactive_lru = MEMPLUS_PAGE_LRU;
+		active_lru = MEMPLUS_PAGE_LRU + LRU_ACTIVE;
+	}
+
 	inactive = lruvec_lru_size(lruvec, inactive_lru, sc->reclaim_idx);
 	active = lruvec_lru_size(lruvec, active_lru, sc->reclaim_idx);
 
@@ -2319,13 +2358,8 @@ static bool inactive_list_is_low(struct lruvec *lruvec, bool file,
 		inactive_ratio = 0;
 	} else {
 		gb = (inactive + active) >> (30 - PAGE_SHIFT);
-#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
-		if (file && gb)
-			inactive_ratio = min(2UL, int_sqrt(10 * gb));
-#else
 		if (gb)
 			inactive_ratio = int_sqrt(10 * gb);
-#endif /*OPLUS_FEATURE_ZRAM_OPT*/
 		else
 			inactive_ratio = 1;
 	}
@@ -2381,38 +2415,19 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 	unsigned long anon, file;
 	unsigned long ap, fp;
 	enum lru_list lru;
-	unsigned long totalswap = total_swap_pages;
-#if defined(CONFIG_NANDSWAP)
-	if (nandswap_si)
-		totalswap -= nandswap_si->pages;
-#endif
 
-
-#if defined(OPLUS_FEATURE_ZRAM_OPT) && defined(CONFIG_OPLUS_ZRAM_OPT)
+#ifdef CONFIG_DIRECT_SWAPPINESS
 	if (!current_is_kswapd())
-		swappiness = direct_vm_swappiness;
-#ifdef CONFIG_DAYAMIC_TUNNING_SWAPPINESS
-	else {
-		unsigned long nr_file_pages =
-			global_node_page_state(NR_ACTIVE_FILE) +
-			global_node_page_state(NR_INACTIVE_FILE);
-
-		if (swappiness_threshold1_size &&
-				nr_file_pages >= (swappiness_threshold1_size << 8) &&
-				swappiness > vm_swappiness_threshold1) {
-			swappiness = vm_swappiness_threshold1;
-		} else if (swappiness_threshold2_size > 0 &&
-				nr_file_pages >= (swappiness_threshold2_size << 8) &&
-				swappiness > vm_swappiness_threshold2) {
-			swappiness = vm_swappiness_threshold2;
-		}
-	}
+		swappiness = vm_direct_swapiness;
 #endif
-	if (!sc->may_swap || (mem_cgroup_get_nr_swap_pages(memcg) <= totalswap>>6)) {
-#else
+
+	if (memplus_enabled()) {
+		scan_balance = SCAN_EQUAL;
+		goto out;
+	}
+
 	/* If we have no swap space, do not bother scanning anon pages. */
 	if (!sc->may_swap || mem_cgroup_get_nr_swap_pages(memcg) <= 0) {
-#endif /*OPLUS_FEATURE_ZRAM_OPT*/
 		scan_balance = SCAN_FILE;
 		goto out;
 	}
@@ -2565,6 +2580,12 @@ out:
 		if (!scan && !mem_cgroup_online(memcg))
 			scan = min(size, SWAP_CLUSTER_MAX);
 
+		if (memplus_enabled() &&
+			(lru == LRU_INACTIVE_ANON || lru == LRU_ACTIVE_ANON)) {
+			size = 0;
+			scan = 0;
+		}
+
 		switch (scan_balance) {
 		case SCAN_EQUAL:
 			/* Scan lists relative to size */
@@ -2636,8 +2657,9 @@ static void shrink_node_memcg(struct pglist_data *pgdat, struct mem_cgroup *memc
 			 sc->priority == DEF_PRIORITY);
 
 	blk_start_plug(&plug);
-	while (nr[LRU_INACTIVE_ANON] || nr[LRU_ACTIVE_FILE] ||
-					nr[LRU_INACTIVE_FILE]) {
+
+	while (nr[MEMPLUS_PAGE_LRU] || nr[LRU_ACTIVE_FILE] ||
+			 nr[LRU_INACTIVE_FILE]) {
 		unsigned long nr_anon, nr_file, percentage;
 		unsigned long nr_scanned;
 
@@ -2664,7 +2686,8 @@ static void shrink_node_memcg(struct pglist_data *pgdat, struct mem_cgroup *memc
 		 * proportional to the original scan target.
 		 */
 		nr_file = nr[LRU_INACTIVE_FILE] + nr[LRU_ACTIVE_FILE];
-		nr_anon = nr[LRU_INACTIVE_ANON] + nr[LRU_ACTIVE_ANON];
+		lru = MEMPLUS_PAGE_LRU;
+		nr_anon = nr[lru] + nr[lru + LRU_ACTIVE];
 
 		/*
 		 * It's just vindictive to attack the larger once the smaller
@@ -2676,9 +2699,8 @@ static void shrink_node_memcg(struct pglist_data *pgdat, struct mem_cgroup *memc
 			break;
 
 		if (nr_file > nr_anon) {
-			unsigned long scan_target = targets[LRU_INACTIVE_ANON] +
-						targets[LRU_ACTIVE_ANON] + 1;
-			lru = LRU_BASE;
+			unsigned long scan_target = targets[lru] +
+						targets[lru + LRU_ACTIVE] + 1;
 			percentage = nr_anon * 100 / scan_target;
 		} else {
 			unsigned long scan_target = targets[LRU_INACTIVE_FILE] +
@@ -2695,7 +2717,8 @@ static void shrink_node_memcg(struct pglist_data *pgdat, struct mem_cgroup *memc
 		 * Recalculate the other LRU scan count based on its original
 		 * scan target and the percentage scanning already complete
 		 */
-		lru = (lru == LRU_FILE) ? LRU_BASE : LRU_FILE;
+
+		lru = (lru == LRU_FILE) ? MEMPLUS_PAGE_LRU : LRU_FILE;
 		nr_scanned = targets[lru] - nr[lru];
 		nr[lru] = targets[lru] * (100 - percentage) / 100;
 		nr[lru] -= min(nr[lru], nr_scanned);
@@ -2715,8 +2738,10 @@ static void shrink_node_memcg(struct pglist_data *pgdat, struct mem_cgroup *memc
 	 * rebalance the anon lru active/inactive ratio.
 	 */
 	if (inactive_list_is_low(lruvec, false, sc, true))
+
 		shrink_active_list(SWAP_CLUSTER_MAX, lruvec,
-				   sc, LRU_ACTIVE_ANON);
+				   sc, MEMPLUS_PAGE_LRU + LRU_ACTIVE);
+
 }
 
 /* Use reclaim/compaction for costly allocs or under memory pressure */
@@ -3394,8 +3419,10 @@ static void age_active_anon(struct pglist_data *pgdat,
 		struct lruvec *lruvec = mem_cgroup_lruvec(pgdat, memcg);
 
 		if (inactive_list_is_low(lruvec, false, sc, true))
+
 			shrink_active_list(SWAP_CLUSTER_MAX, lruvec,
-					   sc, LRU_ACTIVE_ANON);
+					   sc, MEMPLUS_PAGE_LRU + LRU_ACTIVE);
+
 
 		memcg = mem_cgroup_iter(NULL, memcg, NULL);
 	} while (memcg);
@@ -3520,6 +3547,17 @@ static bool kswapd_shrink_node(pg_data_t *pgdat,
 	return sc->nr_scanned >= sc->nr_to_reclaim;
 }
 
+void __sched usleep_range_interruptible(unsigned long min, unsigned long max)
+{
+	ktime_t kmin;
+	u64 delta;
+
+	__set_current_state(TASK_INTERRUPTIBLE);
+
+	kmin = ktime_set(0, min * NSEC_PER_USEC);
+	delta = (u64)(max - min) * NSEC_PER_USEC;
+	schedule_hrtimeout_range(&kmin, delta, HRTIMER_MODE_REL);
+}
 /*
  * For kswapd, balance_pgdat() will reclaim pages across a node from zones
  * that are eligible for use by the caller until at least one zone is
@@ -3634,8 +3672,16 @@ static int balance_pgdat(pg_data_t *pgdat, int order, int classzone_idx)
 		 * progress in reclaiming pages
 		 */
 		nr_reclaimed = sc.nr_reclaimed - nr_reclaimed;
-		if (raise_priority || !nr_reclaimed)
+		if (raise_priority || !nr_reclaimed) {
 			sc.priority--;
+
+			if (vm_breath_period && nr_reclaimed &&
+						!atomic_read(&alloc_ongoing)) {
+				sc.priority++;
+				usleep_range_interruptible(vm_breath_period,
+							vm_breath_period << 1);
+			}
+		}
 	} while (sc.priority >= 1);
 
 	if (!sc.nr_reclaimed)
@@ -3761,11 +3807,7 @@ static void kswapd_try_to_sleep(pg_data_t *pgdat, int alloc_order, int reclaim_o
  * If there are applications that are active memory-allocators
  * (most normal use), this basically shouldn't matter.
  */
-#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
- int kswapd(void *p)
-#else
 static int kswapd(void *p)
-#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
 {
 	unsigned int alloc_order, reclaim_order;
 	unsigned int classzone_idx = MAX_NR_ZONES - 1;
@@ -3930,9 +3972,6 @@ unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
    restore their cpu bindings. */
 static int kswapd_cpu_online(unsigned int cpu)
 {
-#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
-	return kswapd_cpu_online_ext(cpu);
-#else
 	int nid;
 
 	for_each_node_state(nid, N_MEMORY) {
@@ -3946,7 +3985,6 @@ static int kswapd_cpu_online(unsigned int cpu)
 			set_cpus_allowed_ptr(pgdat->kswapd, mask);
 	}
 	return 0;
-#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
 }
 
 /*
@@ -3955,9 +3993,6 @@ static int kswapd_cpu_online(unsigned int cpu)
  */
 int kswapd_run(int nid)
 {
-#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
-		return kswapd_run_ext(nid);
-#else
 	pg_data_t *pgdat = NODE_DATA(nid);
 	int ret = 0;
 
@@ -3973,7 +4008,6 @@ int kswapd_run(int nid)
 		pgdat->kswapd = NULL;
 	}
 	return ret;
-#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
 }
 
 /*
@@ -3982,16 +4016,12 @@ int kswapd_run(int nid)
  */
 void kswapd_stop(int nid)
 {
-#if defined(OPLUS_FEATURE_MULTI_KSWAPD) && defined(CONFIG_OPLUS_MULTI_KSWAPD)
-	return kswapd_stop_ext(nid);
-#else
 	struct task_struct *kswapd = NODE_DATA(nid)->kswapd;
 
 	if (kswapd) {
 		kthread_stop(kswapd);
 		NODE_DATA(nid)->kswapd = NULL;
 	}
-#endif /*OPLUS_FEATURE_MULTI_KSWAPD*/
 }
 
 static int __init kswapd_init(void)

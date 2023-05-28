@@ -5,9 +5,6 @@
 #include <linux/idr.h>
 #include <linux/blk-mq.h>
 #include "blk-mq.h"
-#if defined(OPLUS_FEATURE_FG_IO_OPT) && defined(CONFIG_OPLUS_FG_IO_OPT)
-#include <linux/oplus_healthinfo/oplus_fg.h>
-#endif
 
 /* Amount of time in which a process may batch requests */
 #define BLK_BATCH_TIME	(HZ/50UL)
@@ -21,10 +18,11 @@
 #ifdef CONFIG_DEBUG_FS
 extern struct dentry *blk_debugfs_root;
 #endif
-#if defined(OPLUS_FEATURE_FG_IO_OPT) && defined(CONFIG_OPLUS_FG_IO_OPT)
-extern unsigned int sysctl_fg_io_opt;
-extern struct request * smart_peek_request(struct request_queue *q);
+
+#ifdef CONFIG_ONEPLUS_HEALTHINFO
+extern unsigned long ufs_outstanding;
 #endif
+
 struct blk_flush_queue {
 	unsigned int		flush_queue_delayed:1;
 	unsigned int		flush_pending_idx:1;
@@ -46,6 +44,8 @@ extern struct kmem_cache *blk_requestq_cachep;
 extern struct kmem_cache *request_cachep;
 extern struct kobj_type blk_queue_ktype;
 extern struct ida blk_queue_ida;
+
+extern unsigned long sysctl_blkdev_issue_flush_count;
 
 static inline struct blk_flush_queue *blk_get_flush_queue(
 		struct request_queue *q, struct blk_mq_ctx *ctx)
@@ -155,6 +155,12 @@ static inline void blk_clear_rq_complete(struct request *rq)
 
 void blk_insert_flush(struct request *rq);
 
+
+extern int fg_count;
+extern int both_count;
+extern bool fg_debug;
+extern unsigned int sysctl_fg_io_opt;
+
 static inline struct request *__elv_next_request(struct request_queue *q)
 {
 	struct request *rq;
@@ -163,25 +169,36 @@ static inline struct request *__elv_next_request(struct request_queue *q)
 	WARN_ON_ONCE(q->mq_ops);
 
 	while (1) {
-#if defined(OPLUS_FEATURE_FG_IO_OPT) && defined(CONFIG_OPLUS_FG_IO_OPT)
-		if (likely(sysctl_fg_io_opt)
-#ifdef CONFIG_PM
-		    &&(q->rpm_status == RPM_ACTIVE)
-#endif
-		) {
-			rq = smart_peek_request(q);
-			if(rq)
-				return rq;
-		}
-		else {
-#endif /*OPLUS_FEATURE_FG_IO_OPT*/
 		if (!list_empty(&q->queue_head)) {
-			rq = list_entry_rq(q->queue_head.next);
+
+			if (unlikely(!sysctl_fg_io_opt))
+				rq = list_entry_rq(q->queue_head.next);
+			else {
+#ifdef CONFIG_PM
+				if (!list_empty(&q->fg_head) &&
+					q->fg_count > 0 &&
+					(q->rpm_status == RPM_ACTIVE)) {
+#else
+				if (!list_empty(&q->fg_head) &&
+					q->fg_count > 0) {
+#endif
+					rq = list_entry(
+						q->fg_head.next,
+						struct request,
+						fg_list);
+					q->fg_count--;
+				} else if (q->both_count > 0) {
+					rq = list_entry_rq(q->queue_head.next);
+					q->both_count--;
+				} else {
+					q->fg_count = q->fg_count_max;
+					q->both_count = q->both_count_max;
+					rq = list_entry_rq(q->queue_head.next);
+				}
+			}
 			return rq;
 		}
-#if defined(OPLUS_FEATURE_FG_IO_OPT) && defined(CONFIG_OPLUS_FG_IO_OPT)
-		}
-#endif /*OPLUS_FEATURE_FG_IO_OPT*/
+
 		/*
 		 * Flush request is running and flush request isn't queueable
 		 * in the drive, we can hold the queue till flush request is

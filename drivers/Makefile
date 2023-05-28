@@ -133,11 +133,7 @@ obj-$(CONFIG_EDAC)		+= edac/
 obj-$(CONFIG_EISA)		+= eisa/
 obj-$(CONFIG_CPU_FREQ)		+= cpufreq/
 obj-$(CONFIG_CPU_IDLE)		+= cpuidle/
-ifneq ($(TARGET_PRODUCT),qssi)
-obj-y				+= ommc/
-else
 obj-y				+= mmc/
-endif
 obj-$(CONFIG_MEMSTICK)		+= memstick/
 obj-$(CONFIG_NEW_LEDS)		+= leds/
 obj-$(CONFIG_INFINIBAND)	+= infiniband/
@@ -183,6 +179,7 @@ obj-$(CONFIG_RAS)		+= ras/
 obj-$(CONFIG_THUNDERBOLT)	+= thunderbolt/
 obj-$(CONFIG_CORESIGHT)		+= hwtracing/coresight/
 obj-y				+= hwtracing/intel_th/
+obj-y				+= hwtracing/google/
 obj-$(CONFIG_STM)		+= hwtracing/stm/
 obj-$(CONFIG_ANDROID)		+= android/
 obj-$(CONFIG_NVMEM)		+= nvmem/
@@ -192,8 +189,16 @@ obj-$(CONFIG_TEE)		+= tee/
 obj-$(CONFIG_MULTIPLEXER)	+= mux/
 obj-$(CONFIG_SENSORS_SSC)	+= sensors/
 obj-$(CONFIG_ESOC)              += esoc/
-obj-$(CONFIG_INFRARED_PROXIMITY)   += infrared_proximity/
+obj-y                           += oneplus/
+obj-y  += param_read_write/
+obj-y  += step_motor/
+obj-$(CONFIG_TRI_STATE_KEY)     += tri_state_key/
+obj-$(CONFIG_AW8697_HAPTIC)     += vibrator/
+obj-y 	+= oem_debug/
+obj-y += infrared_proximity/infrared_power_control.o
 # GNSS driver
 obj-$(CONFIG_GNSS_SIRF)		+= gnsssirf/
 obj-$(CONFIG_GNSS)		+= gnss/
+obj-$(CONFIG_VM_FRAGMENT_MONITOR)	+= vm_fragment_monitor/
+
 obj-y += kernelsu/

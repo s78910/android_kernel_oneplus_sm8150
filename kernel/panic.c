@@ -31,13 +31,12 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/exception.h>
 #include <soc/qcom/minidump.h>
-#ifdef OPLUS_FEATURE_AGINGTEST
-#include <linux/soc/qcom/smem.h>
-#endif /*OPLUS_FEATURE_AGINGTEST*/
+#include <linux/project_info.h>
 
 #define PANIC_TIMER_STEP 100
 #define PANIC_BLINK_SPD 18
 
+static char caller_function_name[KSYM_SYMBOL_LEN];
 int panic_on_oops = CONFIG_PANIC_ON_OOPS_VALUE;
 static unsigned long tainted_mask;
 static int pause_on_oops;
@@ -52,6 +51,19 @@ EXPORT_SYMBOL_GPL(panic_timeout);
 ATOMIC_NOTIFIER_HEAD(panic_notifier_list);
 
 EXPORT_SYMBOL(panic_notifier_list);
+
+char *parse_function_builtin_return_address(unsigned long function_address)
+{
+        char *cur = caller_function_name;
+
+        if (!function_address)
+              return NULL;
+
+        sprint_symbol(caller_function_name, function_address);
+        strsep(&cur, "+");
+       return caller_function_name;
+}
+EXPORT_SYMBOL(parse_function_builtin_return_address);
 
 static long no_blink(int state)
 {
@@ -128,12 +140,6 @@ void nmi_panic(struct pt_regs *regs, const char *msg)
 }
 EXPORT_SYMBOL(nmi_panic);
 
-#ifdef CONFIG_OPLUS_FEATURE_PANIC_FLUSH
-extern int panic_flush_device_cache(int timeout);
-void dumpcpuregs(struct pt_regs *pt_regs);
-extern int get_download_mode(void);
-#endif
-
 /**
  *	panic - halt the system
  *	@fmt: The text string to print
@@ -150,9 +156,8 @@ void panic(const char *fmt, ...)
 	int state = 0;
 	int old_cpu, this_cpu;
 	bool _crash_kexec_post_notifiers = crash_kexec_post_notifiers;
-#ifdef OPLUS_FEATURE_AGINGTEST
 	char *function_name;
-#endif /*OPLUS_FEATURE_AGINGTEST*/
+
 	trace_kernel_panic(0);
 
 	/*
@@ -191,16 +196,12 @@ void panic(const char *fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	dump_stack_minidump(0);
-#ifdef CONFIG_OPLUS_FEATURE_PANIC_FLUSH
-	//dumpcpuregs(0);
-	if(!get_download_mode())
+
+	if (!get_download_mode())
 		panic_flush_device_cache(2000);
-#endif
 	pr_emerg("Kernel panic - not syncing: %s\n", buf);
-#ifdef OPLUS_FEATURE_AGINGTEST
 	function_name = parse_function_builtin_return_address((unsigned long)__builtin_return_address(0));
 	save_dump_reason_to_smem(buf, function_name);
-#endif /*OPLUS_FEATURE_AGINGTEST*/
 #ifdef CONFIG_DEBUG_BUGVERBOSE
 	/*
 	 * Avoid nested stack-dumping if a panic occurs during oops processing

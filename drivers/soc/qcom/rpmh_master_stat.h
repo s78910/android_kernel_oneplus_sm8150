@@ -11,12 +11,15 @@
  * GNU General Public License for more details.
  *
  */
-/*#if defined(CONFIG_QTI_RPMH_API) && defined(CONFIG_QTI_RPM_STATS_LOG) */
-#if defined(CONFIG_QTI_RPMH_API) && defined(OPLUS_FEATURE_POWERINFO_RPMH)
-/* 2010/10/15  for rpm debug */
+
+#if defined(CONFIG_QTI_RPMH_API) && defined(CONFIG_QTI_RPM_STATS_LOG)
+
 void msm_rpmh_master_stats_update(void);
+
 #else
 
 static inline void msm_rpmh_master_stats_update(void) {}
 
 #endif
+extern int rpmh_master_stats_open(struct inode *inode, struct file *file);
+extern ssize_t master_stats_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf);

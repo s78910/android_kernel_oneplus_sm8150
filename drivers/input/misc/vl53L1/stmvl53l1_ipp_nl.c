@@ -113,7 +113,7 @@ static int send_client_msg(void *msg_data, int msg_size)
 	int rc;
 	struct sk_buff *skb_out;
 	struct nlmsghdr *nlh;
-	void *nl_data = NULL;
+	void *nl_data;
 
 	ipp_dbg("to send %d byte", msg_size);
 	skb_out = nlmsg_new(msg_size, 0);
@@ -124,11 +124,10 @@ static int send_client_msg(void *msg_data, int msg_size)
 
 	nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, msg_size, 0);
 	NETLINK_CB(skb_out).dst_group = 0; /* not in mcast group */
-	nl_data = nlmsg_data(nlh); /*get data ptr from header*/
 
-	if ((nl_data != NULL) && (msg_data != NULL) && (msg_size > 0)) {
-		memcpy(nl_data, msg_data, msg_size);
-	}
+	nl_data = nlmsg_data(nlh); /*get data ptr from header*/
+	memcpy(nl_data, msg_data, msg_size);
+
 	/* FIXME do we real need to lock to send a data other nl_sk ? */
 	mutex_lock(&ipp_mutex);
 	rc = nlmsg_unicast(nl_sk, skb_out, daemon_pid);

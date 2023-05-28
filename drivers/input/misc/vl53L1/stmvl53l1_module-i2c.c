@@ -68,7 +68,7 @@
 #include "cam_cci_ctrl_interface.h"
 
 #define STMVL53L1_SLAVE_ADDR	(0x52>>1)
-
+#define IGNORE_IRQ  0       //songyt add
 /** @ingroup drv_port
  * @{
  */
@@ -336,7 +336,7 @@ static void put_intr(struct i2c_data *i2c_data)
 int stmvl53l1_parse_tree(struct device *dev, struct i2c_data *i2c_data)
 {
 	int rc = 0;
-
+	enum of_gpio_flags flags;
 	/* if force device is in use then gpio nb comes from module param else
 	 * we use devicetree.
 	 */
@@ -357,34 +357,40 @@ int stmvl53l1_parse_tree(struct device *dev, struct i2c_data *i2c_data)
 			vl53l1_wanrmsg(
         		"no laser_vdd, fatal.");
 		}
-        rc = of_property_read_u32_array(dev->of_node,
-				"pwren-gpio", &i2c_data->pwren_gpio, 1);
-		if (rc) {
-			i2c_data->pwren_gpio = -1;
+		i2c_data->pwren_gpio = of_get_named_gpio_flags(dev->of_node, "pwren-gpio", 0,
+						  &flags);
+		if (gpio_is_valid(i2c_data->pwren_gpio)) {
+			vl53l1_dbgmsg("pwren-gpio %d",
+				i2c_data->pwren_gpio);
+		} else {
 			vl53l1_wanrmsg(
         		"no regulator, nor power gpio => power ctrl disabled");
+			i2c_data->pwren_gpio = -1;
 		}
-		rc = of_property_read_u32_array(dev->of_node, "xsdn-gpio",
-			&i2c_data->xsdn_gpio, 1);
-		if (rc) {
-			vl53l1_wanrmsg("Unable to find xsdn-gpio %d %d",
-				rc, i2c_data->xsdn_gpio);
+		i2c_data->xsdn_gpio = of_get_named_gpio_flags(dev->of_node, "xsdn-gpio", 0,
+						  &flags);
+		if (gpio_is_valid(i2c_data->xsdn_gpio)) {
+			vl53l1_dbgmsg("xsdn-gpio %d",
+				i2c_data->xsdn_gpio);
+		} else {
+			vl53l1_wanrmsg("Unable to find xsdn-gpio %d",
+				i2c_data->xsdn_gpio);
 			i2c_data->xsdn_gpio = -1;
 		}
-		rc = of_property_read_u32_array(dev->of_node, "intr-gpio",
-			&i2c_data->intr_gpio, 1);
-		if (rc) {
-			vl53l1_wanrmsg("Unable to find intr-gpio %d %d",
-				rc, i2c_data->intr_gpio);
+#if IGNORE_IRQ
+        i2c_data->intr_gpio = -1;
+        vl53l1_dbgmsg("do not use intr-gpio!");
+#else
+		i2c_data->intr_gpio = of_get_named_gpio_flags(dev->of_node, "intr-gpio", 0,&flags);
+		if (gpio_is_valid(i2c_data->intr_gpio)) {
+			vl53l1_dbgmsg("intr-gpio %d",
+				i2c_data->intr_gpio);
+		} else {
+			vl53l1_wanrmsg("Unable to find intr-gpio %d",
+				i2c_data->intr_gpio);
 			i2c_data->intr_gpio = -1;
 		}
-		rc = of_property_read_u32_array(dev->of_node, "boot-reg",
-			&i2c_data->boot_reg, 1);
-		if (rc) {
-			vl53l1_wanrmsg("Unable to find boot-reg %d %d",
-				rc, i2c_data->boot_reg);
-			i2c_data->boot_reg = STMVL53L1_SLAVE_ADDR;
-		}
+#endif
 	}
 
 	/* configure gpios */
@@ -395,17 +401,22 @@ int stmvl53l1_parse_tree(struct device *dev, struct i2c_data *i2c_data)
 	if (rc)
 		goto no_pwren;
 	rc = get_intr(dev, i2c_data);
-	if (rc)
+	if (rc){
+        vl53l1_errmsg("get_intr failed.");
 		goto no_intr;
-
+    }
 	return rc;
 
 no_intr:
+#if IGNORE_IRQ
+    return 0;
+#else
 	if (i2c_data->vdd) {
 		regulator_put(i2c_data->vdd);
 		i2c_data->vdd = NULL;
 	}
 	put_pwren(i2c_data);
+#endif
 no_pwren:
 	put_xsdn(i2c_data);
 no_xsdn:
@@ -445,7 +456,7 @@ static int stmvl53l1_probe(struct i2c_client *client,
 	if (vl53l1_data) {
 		vl53l1_data->client_object =
 				kzalloc(sizeof(struct i2c_data), GFP_KERNEL);
-		if (!vl53l1_data->client_object)
+		if (!vl53l1_data)
 			goto done_freemem;
 		i2c_data = (struct i2c_data *)vl53l1_data->client_object;
 	}

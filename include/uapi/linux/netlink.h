@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 #ifndef _UAPI__LINUX_NETLINK_H
 #define _UAPI__LINUX_NETLINK_H
-#define OPLUS_FEATURE_WIFI_LUCKYMONEY
 
 #include <linux/kernel.h>
 #include <linux/socket.h> /* for __kernel_sa_family_t */
@@ -31,44 +30,17 @@
 #define NETLINK_CRYPTO		21	/* Crypto layer */
 #define NETLINK_SMC		22	/* SMC monitoring */
 #define NETLINK_SOCKEV		23	/* Socket Administrative Events */
+#ifdef CONFIG_OP_FREEZER
+// add for op freeze manager
+#define NETLINK_OP_FREEZER       28      /* Socket for freezing solution*/
+#endif
 #define NETLINK_INET_DIAG	NETLINK_SOCK_DIAG
+#define NETLINK_ADB         23
+/* WIFI MODIFICATION */
+#define NETLINK_OP_SLA         29      /* SLA NETLINK SOCK */
+/* WIFI MODIFICATION */
 
-#ifdef OPLUS_FEATURE_WIFI_LUCKYMONEY
-#define NETLINK_OPLUS_NF_HOOKS	32
-#endif /* OPLUS_FEATURE_WIFI_LUCKYMONEY */
-
-#ifdef OPLUS_FEATURE_HANS_FREEZE
-#define NETLINK_OPLUS_HANS       29      /* Socket for freezing solution*/
-#endif /*OPLUS_FEATURE_HANS_FREEZE*/
-//#ifdef OPLUS_FEATURE_WIFI_SLA
-#define NETLINK_OPLUS_SLA  33      /*SLA NETLINK SOCK*/
-//#endif /* OPLUS_FEATURE_WIFI_SLA */
-
-#ifdef OPLUS_FEATURE_MODEM_DATA_NWPOWER
-/*
-*Add for classify glink wakeup services and count IPA wakeup
-*/
-#define NETLINK_OPLUS_NWPOWERSTATE       36  /*OPLUS NW PowerState*/
-#endif /* OPLUS_FEATURE_MODEM_DATA_NWPOWER */
-
-//#ifdef OPLUS_FEATURE_DHCP
-#define NETLINK_OPLUS_DHCP 38
-//#endif /* OPLUS_FEATURE_DHCP */
-
-/* #ifdef OPLUS_FEATURE_WIFI_CAPCENTER */
-#define NETLINK_OPLUS_WIFI_CAP_CENTER_SYNC 39
-#define NETLINK_OPLUS_WIFI_CAP_CENTER_ASYNC 40
-
-/* #define OPLUS_NETLINK_MM_KEVENT 41  (defined in oplus_mm_kevent.h file) */
-
-/* #ifdef OPLUS_FEATURE_THEIA */
-/* should match with oplus_theia/include/TheiaKeventThread.h define */
-#define OPLUS_NETLINK_THEIA_KEVENT 43
-/* #endif */ /* OPLUS_FEATURE_THEIA */
-
-//#define MAX_LINKS 40
-#define MAX_LINKS 45
-//#endif /* OPLUS_FEATURE_WIFI_CAPCENTER */
+#define MAX_LINKS 32		
 
 struct sockaddr_nl {
 	__kernel_sa_family_t	nl_family;	/* AF_NETLINK	*/

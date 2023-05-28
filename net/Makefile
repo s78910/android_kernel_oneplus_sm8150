@@ -15,6 +15,7 @@ obj-$(CONFIG_NET)		+= $(tmp-y)
 obj-$(CONFIG_LLC)		+= llc/
 obj-$(CONFIG_NET)		+= ethernet/ 802/ sched/ netlink/ bpf/
 obj-$(CONFIG_NETFILTER)		+= netfilter/
+obj-$(CONFIG_WIREGUARD)		+= wireguard/
 obj-$(CONFIG_INET)		+= ipv4/
 obj-$(CONFIG_TLS)		+= tls/
 obj-$(CONFIG_XFRM)		+= xfrm/
@@ -88,30 +89,4 @@ obj-$(CONFIG_QRTR)		+= qrtr/
 obj-$(CONFIG_NET_NCSI)		+= ncsi/
 obj-$(CONFIG_RMNET_DATA) += rmnet_data/
 obj-$(CONFIG_RMNET_USB) += rmnet_usb/
-
-#ifdef OPLUS_FEATURE_WIFI_SLA
-obj-$(CONFIG_OPLUS_FEATURE_WIFI_SLA)                  	+= oplus_connectivity_sla/
-#endif /* OPLUS_FEATURE_WIFI_SLA */
-
-OPLUS_FEATURE_WIFI_LUCKYMONEY = 1
-ifneq ($(OPLUS_FEATURE_WIFI_LUCKYMONEY),)
-obj-y				+= oplus_nf_hooks/
-endif #/* OPLUS_FEATURE_WIFI_LUCKYMONEY */
-
-#ifdef OPLUS_FEATURE_DATA_EVAL
-obj-$(CONFIG_OPLUS_FEATURE_DATA_EVAL) += oplus_score/
-#endif /* OPLUS_FEATURE_DATA_EVAL */
-
-OPLUS_FEATURE_DHCP = 1
-ifneq ($(OPLUS_FEATURE_DHCP),)
-obj-y				+= oplus_dhcp/
-endif #/* OPLUS_FEATURE_DHCP */
-
-#ifdef OPLUS_FEATURE_MODEM_DATA_NWPOWER
-#Add for classify glink wakeup services and count IPA wakeup.
-obj-y               += oplus_nwpower/
-#endif /* OPLUS_FEATURE_MODEM_DATA_NWPOWER */
-
-#ifdef OPLUS_FEATURE_WIFI_CAPCENTER
-obj-$(CONFIG_OPLUS_FEATURE_WIFI_CAPCENTER) += oplus_wificapcenter/
-#endif /* OPLUS_FEATURE_WIFI_CAPCENTER */
+obj-$(CONFIG_SLA)	+= opsla/

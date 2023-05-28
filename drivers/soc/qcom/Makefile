@@ -44,7 +44,7 @@ obj-$(CONFIG_MSM_GLADIATOR_ERP) += gladiator_erp.o
 obj-$(CONFIG_QCOM_MINIDUMP) += msm_minidump.o minidump_log.o
 obj-$(CONFIG_QCOM_SECURE_BUFFER) += secure_buffer.o
 obj-$(CONFIG_QCOM_MEMORY_DUMP_V2) += memory_dump_v2.o
-obj-$(CONFIG_QCOM_WATCHDOG_V2) += watchdog_v2.o oplus_watchdog_util.o
+obj-$(CONFIG_QCOM_WATCHDOG_V2) += watchdog_v2.o
 obj-$(CONFIG_QPNP_PBS) += qpnp-pbs.o
 obj-$(CONFIG_ICNSS) += icnss.o
 obj-$(CONFIG_ICNSS_QMI) += icnss_qmi.o wlan_firmware_service_v01.o
@@ -87,25 +87,17 @@ obj-$(CONFIG_QSEE_IPC_IRQ_BRIDGE) += qsee_ipc_irq_bridge.o
 obj-$(CONFIG_QCOM_GLINK) += glink_probe.o
 obj-$(CONFIG_QCOM_GLINK_PKT) += glink_pkt.o
 obj-$(CONFIG_QCOM_QDSS_BRIDGE) += qdss_bridge.o
-obj-$(CONFIG_MSM_QBT1000) += qbt1000.o
+#obj-$(CONFIG_MSM_QBT1000) += qbt1000.o
 obj-$(CONFIG_MSM_EVENT_TIMER) += event_timer.o
 obj-$(CONFIG_MSM_IDLE_STATS)	+= lpm-stats.o
-
+obj-$(CONFIG_QTI_RPM_STATS_LOG) += rpm_stats.o
 obj-$(CONFIG_QCOM_FSA4480_I2C)	+= fsa4480-i2c.o
-
-#ifdef OPLUS_FEATURE_POWERINFO_RPMH
-obj-$(CONFIG_QTI_RPMH_API) += rpm_stats.o
-obj-$(CONFIG_QTI_RPMH_API) += rpmh_master_stat.o
-#else
-# obj-$(CONFIG_QTI_RPM_STATS_LOG) += rpm_stats.o
-# ifdef CONFIG_QTI_RPMH_API
-# 	obj-$(CONFIG_QTI_RPM_STATS_LOG) += rpmh_master_stat.o
-# endif
-# ifdef CONFIG_MSM_RPM_SMD
-# 	obj-$(CONFIG_QTI_RPM_STATS_LOG) += rpm_master_stat.o
-# endif
-#endif
-
+ifdef CONFIG_QTI_RPMH_API
+	obj-$(CONFIG_QTI_RPM_STATS_LOG) += rpmh_master_stat.o
+endif
+ifdef CONFIG_MSM_RPM_SMD
+	obj-$(CONFIG_QTI_RPM_STATS_LOG) += rpm_master_stat.o
+endif
 obj-$(CONFIG_QMP_DEBUGFS_CLIENT) += qmp-debugfs-client.o
 obj-$(CONFIG_MSM_BGCOM) += bgcom_spi.o
 obj-$(CONFIG_MSM_BGCOM_INTERFACE) += bgcom_interface.o
@@ -123,10 +115,8 @@ obj-$(CONFIG_QCOM_AOP_DDR_MESSAGING) += aop_ddr_msgs.o
 obj-$(CONFIG_MSM_HAB) += hab/
 obj-$(CONFIG_QCOM_HGSL) += hgsl/
 obj-$(CONFIG_QCOM_HYP_CORE_CTL) += hyp_core_ctl.o
+obj-$(CONFIG_RF_CABLE_DETECT) += op_rf_cable_monitor.o
 obj-$(CONFIG_QCOM_AOP_DDRSS_COMMANDS) += aop_ddrss_cmds.o
-#ifdef OPLUS_ARCH_EXTENDS
-obj-$(CONFIG_QCOM_MAX20328_I2C) += max20328.o
-#endif
 obj-$(CONFIG_RMNET_CTL) += rmnet_ctl/
 obj-$(CONFIG_QCOM_ADSP_MANUAL_VOTE) += adsp_vote_qmi.o adsp_lpm_voting_v01.o
 obj-$(CONFIG_CPU_V7) += idle-v7.o
