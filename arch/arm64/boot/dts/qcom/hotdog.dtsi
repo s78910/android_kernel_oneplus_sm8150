@@ -87,7 +87,7 @@
 		};
 	};
 
-	skin-msm-therm {
+	msm-therm {
 		trips {
 			freq_config3: freq_config3 {
 				temperature = <62000>;
@@ -164,7 +164,7 @@
 	oneplus_fastchg@26{
 		microchip,mcu-en-gpio = <&tlmm 10 0x00>;
 		op,mcl_verion;
-		op,4085mAh_4p45_support;
+		op,4085mAh_4p45_lcd_support;
 	};
 };
 
@@ -176,7 +176,9 @@
 	op,vbus-ctrl-gpio = <&pm8150_gpios 9 GPIO_ACTIVE_LOW>;
 
 	/*not need vph sel 300mv for LCD DCDC mode switch issue*/
-	vph-sel-disable;
+	//vph-sel-disable;
+	/*adjust the ffc flow/vbat for LCD DCDC PSM mode ripple*/
+	ffc-vbat-limit;
 
 	/* for usb connecter temperature check */
 	op,normal-check-interval-period = <300>;

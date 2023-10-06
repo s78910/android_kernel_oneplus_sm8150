@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  *
@@ -48,10 +48,7 @@
  */
 #define SDE_DEBUG(fmt, ...)                                                \
 	do {                                                               \
-		if (unlikely(drm_debug & DRM_UT_KMS))                      \
-			DRM_DEBUG(fmt, ##__VA_ARGS__); \
-		else                                                       \
-			pr_debug(fmt, ##__VA_ARGS__);                      \
+		no_printk(fmt, ##__VA_ARGS__);                             \
 	} while (0)
 
 /**
@@ -72,10 +69,7 @@
  */
 #define SDE_DEBUG_DRIVER(fmt, ...)                                         \
 	do {                                                               \
-		if (unlikely(drm_debug & DRM_UT_DRIVER))                   \
-			DRM_ERROR(fmt, ##__VA_ARGS__); \
-		else                                                       \
-			pr_debug(fmt, ##__VA_ARGS__);                      \
+		no_printk(fmt, ##__VA_ARGS__);                             \
 	} while (0)
 
 #define SDE_ERROR(fmt, ...) pr_err("[sde error]" fmt, ##__VA_ARGS__)
@@ -232,8 +226,8 @@ struct sde_kms {
 	struct dentry *debugfs_vbif;
 
 	/* io/register spaces: */
-	void __iomem *mmio, *vbif[VBIF_MAX], *reg_dma;
-	unsigned long mmio_len, vbif_len[VBIF_MAX], reg_dma_len;
+	void __iomem *mmio, *vbif[VBIF_MAX], *reg_dma, *sid;
+	unsigned long mmio_len, vbif_len[VBIF_MAX], reg_dma_len, sid_len;
 
 	struct regulator *vdd;
 	struct regulator *mmagic;
@@ -257,6 +251,7 @@ struct sde_kms {
 	struct sde_splash_data splash_data;
 	struct sde_hw_vbif *hw_vbif[VBIF_MAX];
 	struct sde_hw_mdp *hw_mdp;
+	struct sde_hw_sid *hw_sid;
 	int dsi_display_count;
 	void **dsi_displays;
 	int wb_display_count;
@@ -671,5 +666,13 @@ void sde_kms_timeline_status(struct drm_device *dev);
  * return: 0 on success; error code otherwise
  */
 int sde_kms_handle_recovery(struct drm_encoder *encoder);
+
+/**
+ * sde_kms_release_splash_resource - release splash resource
+ * @sde_kms: poiner to sde_kms structure
+ * @crtc: crtc that splash resource to be released from
+ */
+void sde_kms_release_splash_resource(struct sde_kms *sde_kms,
+		struct drm_crtc *crtc);
 
 #endif /* __sde_kms_H__ */

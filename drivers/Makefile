@@ -179,6 +179,7 @@ obj-$(CONFIG_RAS)		+= ras/
 obj-$(CONFIG_THUNDERBOLT)	+= thunderbolt/
 obj-$(CONFIG_CORESIGHT)		+= hwtracing/coresight/
 obj-y				+= hwtracing/intel_th/
+obj-y				+= hwtracing/google/
 obj-$(CONFIG_STM)		+= hwtracing/stm/
 obj-$(CONFIG_ANDROID)		+= android/
 obj-$(CONFIG_NVMEM)		+= nvmem/
@@ -197,4 +198,5 @@ obj-y 	+= oem_debug/
 obj-y += infrared_proximity/infrared_power_control.o
 # GNSS driver
 obj-$(CONFIG_GNSS_SIRF)		+= gnsssirf/
-obj-y  += vm_fragment_monitor/
+obj-$(CONFIG_GNSS)		+= gnss/
+obj-$(CONFIG_VM_FRAGMENT_MONITOR)	+= vm_fragment_monitor/

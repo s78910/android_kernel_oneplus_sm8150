@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -421,10 +421,7 @@ int cam_cci_soc_release(struct cci_device *cci_dev)
 	cci_dev->cci_state = CCI_STATE_DISABLED;
 	cci_dev->cycles_per_us = 0;
 
-	rc = cam_cpas_stop(cci_dev->cpas_handle);
-	if (rc)
-		CAM_ERR(CAM_CCI, "cpas stop failed %d", rc);
-
+	cam_cpas_stop(cci_dev->cpas_handle);
 	CAM_INFO(CAM_CCI, "End release ref_count %d dev=%s", cci_dev->ref_count,cci_dev->device_name);
 
 	return rc;

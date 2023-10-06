@@ -162,6 +162,8 @@ static ssize_t quota_proc_write(struct file *file, const char __user *input,
 	if (copy_from_user(buf, input, size) != 0)
 		return -EFAULT;
 	buf[sizeof(buf)-1] = '\0';
+	if (size < sizeof(buf))
+		buf[size] = '\0';
 
 	spin_lock_bh(&e->lock);
 	e->quota = simple_strtoull(buf, NULL, 0);
@@ -296,8 +298,8 @@ static void quota_mt2_destroy(const struct xt_mtdtor_param *par)
 	}
 
 	list_del(&e->list);
-	remove_proc_entry(e->name, proc_xt_quota);
 	spin_unlock_bh(&counter_list_lock);
+	remove_proc_entry(e->name, proc_xt_quota);
 	kfree(e);
 }
 

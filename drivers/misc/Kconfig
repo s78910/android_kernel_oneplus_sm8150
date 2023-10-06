@@ -490,6 +490,14 @@ config QSEECOM
           Manager (SCM) interface. It exposes APIs for both userspace and
           kernel clients.
 
+config PROFILER
+       tristate "Qualcomm Technologies, Inc. trustzone Communicator driver"
+       help
+         Provides a communication interface between userspace and
+         trustzone using Secure Channel Manager (SCM) interface.
+         It exposes APIs for userspace to get system profiling
+         information.
+
 config VEXPRESS_SYSCFG
 	bool "Versatile Express System Configuration driver"
 	depends on VEXPRESS_CONFIG
@@ -597,6 +605,12 @@ config BOOTLOADER_LOG
 config AUDIO_SENSOR
 	tristate "support sensor notify audio to control ultrasound"
 	default y
+
+config FORCE_FAST_CHARGE
+	bool "Force faster charge rate for USB"
+	default n
+	help
+	  This allows users to override default charge rate for USB
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"

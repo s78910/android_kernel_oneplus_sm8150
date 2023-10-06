@@ -438,6 +438,7 @@ static u32 clear_idx;
 /* record buffer */
 #define LOG_ALIGN __alignof__(struct printk_log)
 #define __LOG_BUF_LEN (1 << CONFIG_LOG_BUF_SHIFT)
+#define LOG_BUF_LEN_MAX (u32)(1 << 31)
 static char __log_buf[__LOG_BUF_LEN] __aligned(LOG_ALIGN);
 static char *log_buf = __log_buf;
 static u32 log_buf_len = __LOG_BUF_LEN;
@@ -761,7 +762,7 @@ struct devkmsg_user {
 
 static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 {
-	char *buf, *line;
+	char buf[LOG_LINE_MAX + 1], *line;
 	int level = default_message_loglevel;
 	int facility = 1;	/* LOG_USER */
 	struct file *file = iocb->ki_filp;
@@ -782,15 +783,9 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 			return ret;
 	}
 
-	buf = kmalloc(len+1, GFP_KERNEL);
-	if (buf == NULL)
-		return -ENOMEM;
-
 	buf[len] = '\0';
-	if (!copy_from_iter_full(buf, len, from)) {
-		kfree(buf);
+	if (!copy_from_iter_full(buf, len, from))
 		return -EFAULT;
-	}
 
 	/*
 	 * Extract and skip the syslog prefix <[0-9]*>. Coming from userspace
@@ -818,7 +813,6 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 	}
 
 	printk_emit(facility, level, NULL, 0, "%s", line);
-	kfree(buf);
 	return ret;
 }
 
@@ -1038,18 +1032,23 @@ void log_buf_vmcoreinfo_setup(void)
 static unsigned long __initdata new_log_buf_len;
 
 /* we practice scaling the ring buffer by powers of 2 */
-static void __init log_buf_len_update(unsigned size)
+static void __init log_buf_len_update(u64 size)
 {
+	if (size > (u64)LOG_BUF_LEN_MAX) {
+		size = (u64)LOG_BUF_LEN_MAX;
+		pr_err("log_buf over 2G is not supported.\n");
+	}
+
 	if (size)
 		size = roundup_pow_of_two(size);
 	if (size > log_buf_len)
-		new_log_buf_len = size;
+		new_log_buf_len = (unsigned long)size;
 }
 
 /* save requested log_buf_len since it's too early to process it */
 static int __init log_buf_len_setup(char *str)
 {
-	unsigned int size;
+	u64 size;
 
 	if (!str)
 		return -EINVAL;
@@ -1107,7 +1106,7 @@ void __init setup_log_buf(int early)
 {
 	unsigned long flags;
 	char *new_log_buf;
-	int free;
+	unsigned int free;
 
 	if (log_buf != __log_buf)
 		return;
@@ -1127,7 +1126,7 @@ void __init setup_log_buf(int early)
 	}
 
 	if (unlikely(!new_log_buf)) {
-		pr_err("log_buf_len: %ld bytes not available\n",
+		pr_err("log_buf_len: %lu bytes not available\n",
 			new_log_buf_len);
 		return;
 	}
@@ -1140,8 +1139,8 @@ void __init setup_log_buf(int early)
 	memcpy(log_buf, __log_buf, __LOG_BUF_LEN);
 	logbuf_unlock_irqrestore(flags);
 
-	pr_info("log_buf_len: %d bytes\n", log_buf_len);
-	pr_info("early log buf free: %d(%d%%)\n",
+	pr_info("log_buf_len: %u bytes\n", log_buf_len);
+	pr_info("early log buf free: %u(%u%%)\n",
 		free, (free * 100) / __LOG_BUF_LEN);
 }
 
@@ -1289,13 +1288,9 @@ static size_t msg_print_text(const struct printk_log *msg, bool syslog, char *bu
 
 static int syslog_print(char __user *buf, int size)
 {
-	char *text;
+	char text[LOG_LINE_MAX + PREFIX_MAX];
 	struct printk_log *msg;
 	int len = 0;
-
-	text = kmalloc(LOG_LINE_MAX + PREFIX_MAX, GFP_KERNEL);
-	if (!text)
-		return -ENOMEM;
 
 	while (size > 0) {
 		size_t n;
@@ -1344,7 +1339,6 @@ static int syslog_print(char __user *buf, int size)
 		buf += n;
 	}
 
-	kfree(text);
 	return len;
 }
 
@@ -3250,7 +3244,7 @@ bool kmsg_dump_get_buffer(struct kmsg_dumper *dumper, bool syslog,
 	/* move first record forward until length fits into the buffer */
 	seq = dumper->cur_seq;
 	idx = dumper->cur_idx;
-	while (l > size && seq < dumper->next_seq) {
+	while (l >= size && seq < dumper->next_seq) {
 		struct printk_log *msg = log_from_idx(idx);
 
 		l -= msg_print_text(msg, true, NULL, 0);

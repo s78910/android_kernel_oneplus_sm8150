@@ -15,7 +15,9 @@
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
 #include <linux/pm_wakeirq.h>
-#include <linux/types.h>
+#include <linux/irq.h>
+#include <linux/interrupt.h>
+#include <linux/wakeup_reason.h>
 #include <trace/events/power.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
@@ -24,6 +26,21 @@
 #include "power.h"
 #include <linux/wakeup_reason.h>
 #include <linux/pm_wakeup.h>
+
+#ifndef CONFIG_SUSPEND
+suspend_state_t pm_suspend_target_state;
+#define pm_suspend_target_state	(PM_SUSPEND_ON)
+#endif
+
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+#include "boeffla_wl_blocker.h"
+
+char list_wl_search[LENGTH_LIST_WL_SEARCH] = {0};
+bool wl_blocker_active = false;
+bool wl_blocker_debug = false;
+
+static void wakeup_source_deactivate(struct wakeup_source *ws);
+#endif
 
 /*
  * If set, the suspend/hibernate code will abort transitions to a sleep state
@@ -73,6 +90,7 @@ static struct wakeup_source deleted_ws = {
 	.lock =  __SPIN_LOCK_UNLOCKED(deleted_ws.lock),
 };
 
+static DEFINE_IDA(wakeup_ida);
 #define WORK_TIMEOUT	(60*1000)
 static void ws_printk(struct work_struct *work);
 static DECLARE_DELAYED_WORK(ws_printk_work, ws_printk);
@@ -100,14 +118,32 @@ EXPORT_SYMBOL_GPL(wakeup_source_prepare);
  */
 struct wakeup_source *wakeup_source_create(const char *name)
 {
-	struct wakeup_source *ws;
+ 	struct wakeup_source *ws;
+	const char *ws_name;
+	int id;
 
-	ws = kmalloc(sizeof(*ws), GFP_KERNEL);
+	ws = kzalloc(sizeof(*ws), GFP_KERNEL);
 	if (!ws)
-		return NULL;
+		goto err_ws;
 
-	wakeup_source_prepare(ws, name ? kstrdup_const(name, GFP_KERNEL) : NULL);
+	ws_name = kstrdup_const(name, GFP_KERNEL);
+	if (!ws_name)
+		goto err_name;
+	ws->name = ws_name;
+
+	id = ida_simple_get(&wakeup_ida, 0, 0, GFP_KERNEL);
+	if (id < 0)
+		goto err_id;
+	ws->id = id;
+
 	return ws;
+
+err_id:
+	kfree_const(ws->name);
+err_name:
+	kfree(ws);
+err_ws:
+	return NULL;
 }
 EXPORT_SYMBOL_GPL(wakeup_source_create);
 
@@ -155,6 +191,13 @@ static void wakeup_source_record(struct wakeup_source *ws)
 	spin_unlock_irqrestore(&deleted_ws.lock, flags);
 }
 
+static void wakeup_source_free(struct wakeup_source *ws)
+{
+	ida_simple_remove(&wakeup_ida, ws->id);
+	kfree_const(ws->name);
+	kfree(ws);
+}
+
 /**
  * wakeup_source_destroy - Destroy a struct wakeup_source object.
  * @ws: Wakeup source to destroy.
@@ -168,8 +211,7 @@ void wakeup_source_destroy(struct wakeup_source *ws)
 
 	wakeup_source_drop(ws);
 	wakeup_source_record(ws);
-	kfree_const(ws->name);
-	kfree(ws);
+	wakeup_source_free(ws);
 }
 EXPORT_SYMBOL_GPL(wakeup_source_destroy);
 
@@ -187,7 +229,6 @@ void wakeup_source_add(struct wakeup_source *ws)
 	spin_lock_init(&ws->lock);
 	setup_timer(&ws->timer, pm_wakeup_timer_fn, (unsigned long)ws);
 	ws->active = false;
-	ws->last_time = ktime_get();
 
 	spin_lock_irqsave(&events_lock, flags);
 	list_add_rcu(&ws->entry, &wakeup_sources);
@@ -222,16 +263,26 @@ EXPORT_SYMBOL_GPL(wakeup_source_remove);
 
 /**
  * wakeup_source_register - Create wakeup source and add it to the list.
+ * @dev: Device this wakeup source is associated with (or NULL if virtual).
  * @name: Name of the wakeup source to register.
  */
-struct wakeup_source *wakeup_source_register(const char *name)
+struct wakeup_source *wakeup_source_register(struct device *dev,
+					     const char *name)
 {
 	struct wakeup_source *ws;
+	int ret;
 
 	ws = wakeup_source_create(name);
-	if (ws)
+	if (ws) {
+		if (!dev || device_is_registered(dev)) {
+			ret = wakeup_source_sysfs_add(dev, ws);
+			if (ret) {
+				wakeup_source_free(ws);
+				return NULL;
+			}
+		}
 		wakeup_source_add(ws);
-
+	}
 	return ws;
 }
 EXPORT_SYMBOL_GPL(wakeup_source_register);
@@ -244,6 +295,7 @@ void wakeup_source_unregister(struct wakeup_source *ws)
 {
 	if (ws) {
 		wakeup_source_remove(ws);
+		wakeup_source_sysfs_remove(ws);
 		wakeup_source_destroy(ws);
 	}
 }
@@ -284,7 +336,10 @@ int device_wakeup_enable(struct device *dev)
 	if (!dev || !dev->power.can_wakeup)
 		return -EINVAL;
 
-	ws = wakeup_source_register(dev_name(dev));
+	if (pm_suspend_target_state != PM_SUSPEND_ON)
+		dev_dbg(dev, "Suspicious %s() during system transition!\n", __func__);
+
+	ws = wakeup_source_register(dev, dev_name(dev));
 	if (!ws)
 		return -ENOMEM;
 
@@ -557,6 +612,57 @@ static void wakeup_source_activate(struct wakeup_source *ws)
 	trace_wakeup_source_activate(ws->name, cec);
 }
 
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+// AP: Function to check if a wakelock is on the wakelock blocker list
+static bool check_for_block(struct wakeup_source *ws)
+{
+	char wakelock_name[52] = {0};
+	int length;
+
+	// if debug mode on, print every wakelock requested
+	if (wl_blocker_debug)
+		printk("Boeffla WL blocker: %s requested\n", ws->name);
+
+	// if there is no list of wakelocks to be blocked, exit without futher checking
+	if (!wl_blocker_active)
+		return false;
+
+	// only if ws structure is valid
+	if (ws)
+	{
+		// wake lock names handled have maximum length=50 and minimum=1
+		length = strlen(ws->name);
+		if ((length > 50) || (length < 1))
+			return false;
+
+		// check if wakelock is in wake lock list to be blocked
+		sprintf(wakelock_name, ";%s;", ws->name);
+
+		if(strstr(list_wl_search, wakelock_name) == NULL)
+			return false;
+
+		// wake lock is in list, print it if debug mode on
+		if (wl_blocker_debug)
+			printk("Boeffla WL blocker: %s blocked\n", ws->name);
+
+		// if it is currently active, deactivate it immediately + log in debug mode
+		if (ws->active)
+		{
+			wakeup_source_deactivate(ws);
+
+			if (wl_blocker_debug)
+				printk("Boeffla WL blocker: %s killed\n", ws->name);
+		}
+
+		// finally block it
+		return true;
+	}
+
+	// there was no valid ws structure, do not block by default
+	return false;
+}
+#endif
+
 /**
  * wakeup_source_report_event - Report wakeup event using the given source.
  * @ws: Wakeup source to report the event for.
@@ -564,6 +670,10 @@ static void wakeup_source_activate(struct wakeup_source *ws)
  */
 static void wakeup_source_report_event(struct wakeup_source *ws, bool hard)
 {
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+	if (!check_for_block(ws))	// AP: check if wakelock is on wakelock blocker list
+	{
+#endif
 	ws->event_count++;
 	/* This is racy, but the counter is approximate anyway. */
 	if (events_check_enabled)
@@ -571,6 +681,10 @@ static void wakeup_source_report_event(struct wakeup_source *ws, bool hard)
 
 	if (!ws->active)
 		wakeup_source_activate(ws);
+
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+	}
+#endif
 
 	if (hard)
 		pm_system_wakeup();
@@ -598,6 +712,7 @@ void __pm_stay_awake(struct wakeup_source *ws)
 	spin_unlock_irqrestore(&ws->lock, flags);
 }
 EXPORT_SYMBOL_GPL(__pm_stay_awake);
+
 
 /**
  * pm_stay_awake - Notify the PM core that a wakeup event is being processed.
@@ -863,7 +978,10 @@ void pm_print_active_wakeup_sources(void)
 	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
 		if (ws->active) {
 			pr_info("active wakeup source: %s\n", ws->name);
-			active = 1;
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+			if (!check_for_block(ws))	// AP: check if wakelock is on wakelock blocker list
+#endif
+				active = 1;
 		} else if (!active &&
 			   (!last_activity_ws ||
 			    ktime_to_ns(ws->last_time) >
@@ -909,6 +1027,7 @@ bool pm_wakeup_pending(void)
 {
 	unsigned long flags;
 	bool ret = false;
+	char suspend_abort[MAX_SUSPEND_ABORT_LEN];
 
 	spin_lock_irqsave(&events_lock, flags);
 	if (events_check_enabled) {
@@ -921,8 +1040,10 @@ bool pm_wakeup_pending(void)
 	spin_unlock_irqrestore(&events_lock, flags);
 
 	if (ret) {
-		pr_info("PM: Wakeup pending, aborting suspend\n");
-		pm_print_active_wakeup_sources();
+		pm_get_active_wakeup_sources(suspend_abort,
+					     MAX_SUSPEND_ABORT_LEN);
+		log_suspend_abort_reason(suspend_abort);
+		pr_info("PM: %s\n", suspend_abort);
 	}
 
 	return ret || atomic_read(&pm_abort_suspend) > 0;
@@ -937,7 +1058,7 @@ EXPORT_SYMBOL_GPL(pm_system_wakeup);
 
 void pm_system_cancel_wakeup(void)
 {
-	atomic_dec(&pm_abort_suspend);
+	atomic_dec_if_positive(&pm_abort_suspend);
 }
 
 void pm_wakeup_clear(bool reset)
@@ -960,7 +1081,7 @@ void pm_system_irq_wakeup(unsigned int irq_number)
 			else if (desc->action && desc->action->name)
 				name = desc->action->name;
 
-			log_wakeup_reason(irq_number);
+			log_irq_wakeup_reason(irq_number);
 			pr_warn("%s: %d triggered %s\n", __func__,
 					irq_number, name);
 
