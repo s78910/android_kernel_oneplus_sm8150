@@ -11,9 +11,11 @@
 #
 .*
 *.a
+*.asn1.[ch]
 *.bin
 *.bz2
 *.c.[012]*.*
+*.dt.yaml
 *.dtb
 *.dtb.S
 *.dwo
@@ -22,11 +24,13 @@
 *.gz
 *.i
 *.ko
+*.lex.c
 *.ll
 *.lst
 *.lz4
 *.lzma
 *.lzo
+*.mod
 *.mod.c
 *.o
 *.o.*
@@ -37,6 +41,7 @@
 *.so.dbg
 *.su
 *.symtypes
+*.tab.[ch]
 *.tar
 *.xz
 Module.symvers
@@ -54,6 +59,7 @@ modules.builtin
 /vmlinuz
 /System.map
 /Module.markers
+/modules.builtin.modinfo
 
 #
 # RPM spec file (make rpm-pkg)
@@ -61,9 +67,9 @@ modules.builtin
 /*.spec
 
 #
-# Debian directory (make deb-pkg)
+# Snap directory (make snap-pkg)
 #
-/debian/
+/snap/
 
 #
 # tar directory (make tar*-pkg)
@@ -71,18 +77,22 @@ modules.builtin
 /tar-install/
 
 #
-# git files that we don't want to ignore even if they are dot-files
+# We don't want to ignore the following even if they are dot-files
 #
+!.clang-format
+!.cocciconfig
+!.get_maintainer.ignore
+!.gitattributes
 !.gitignore
 !.mailmap
-!.cocciconfig
 
 #
 # Generated include files
 #
-include/config
-include/generated
-arch/*/include/generated
+/include/config/
+/include/generated/
+/include/ksym/
+/arch/*/include/generated/
 
 # stgit generated dirs
 patches-*
@@ -118,20 +128,15 @@ signing_key.x509
 x509.genkey
 
 # Kconfig presets
-all.config
+/all.config
+/alldef.config
+/allmod.config
+/allno.config
+/allrandom.config
+/allyes.config
 
 # Kdevelop4
 *.kdev4
 
-# fetched Android config fragments
-kernel/configs/android-*.cfg
-
-
-# OP SLA feature
-opslalib/slalib
-
-#front camera motor and hall
-drivers/step_motor
-drivers/tri_state_key
-drivers/oneplus
-drivers/vibrator
+# Clang's compilation database file
+/compile_commands.json
