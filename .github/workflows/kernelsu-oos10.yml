@@ -1,0 +1,79 @@
+name: Build OnePlus-Sm8150-Kernel-OOS10
+on:
+  workflow_dispatch:
+  schedule:
+      # Run once a week on Sunday at midnight. See http://crontab.guru
+      - cron: '0 21 * * *'
+  push:
+    branches:
+      - oneplus/OOS_SM8150_10.0
+  pull_request:
+      branches:
+      - oneplus/OOS_SM8150_10.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_MAXSIZE: "2G"
+      CCACHE_HARDLINK: "true"
+      KERNEL_DEFCONFIG: "blu_spark_defconfig"
+      KERNEL_CMDLINE: "ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 O=out"
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        submodules: 'true'
+        fetch-depth: 1
+    - name: Set up ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      
+    - name: Remove unnecessary files
+      run: |
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -y 
+        sudo apt install gcc-aarch64-linux-gnu -y
+        sudo apt install gcc-arm-linux-gnueabi -y
+        sudo apt install clang-14 -y
+        sudo apt install binutils make python3 libssl-dev build-essential bc  bison flex unzip libssl-dev ca-certificates xz-utils mkbootimg cpio device-tree-compiler git git-lfs -y
+        git clone https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 aarch64 --depth=1
+        git clone https://github.com/snowwolf725/AnyKernel3 -b oneplus7 --depth=1
+        rm -rf AnyKernel3/.git
+    - name: Remove unnecessary files
+      run: |
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+    - name: Get Version
+      id: get_version
+      run: |
+        cd KernelSU
+        git fetch --unshallow
+        git pull
+        git rev-list --count HEAD
+        echo "VERSION=$(expr $(git rev-list --count HEAD) + 10200)" >> $GITHUB_OUTPUT
+        cd ..
+    - name: Build Kernel
+      run: |
+       export PATH=$(pwd)/clang/bin/:$(pwd)/aarch64/bin/:$PATH
+       export ARCH=arm64
+       export SUBARCH=arm64
+       export LD=ld.lld
+       export BRAND_SHOW_FLAG=oneplus
+       export TARGET_PRODUCT=msmnile
+       make $KERNEL_CMDLINE $KERNEL_DEFCONFIG CC="ccache clang-14"
+       make $KERNEL_CMDLINE CC="ccache clang-14" -j$(nproc --all)
+       cp out/arch/arm64/boot/Image AnyKernel3
+    - name: Upload Kernel-SU
+      uses: actions/upload-artifact@v3
+      with:
+        name: OP7-OOS10-kernel-SU-${{ steps.get_version.outputs.VERSION }}
+        path: "AnyKernel3/*"
