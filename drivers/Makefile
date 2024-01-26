@@ -198,3 +198,4 @@ obj-y += infrared_proximity/infrared_power_control.o
 # GNSS driver
 obj-$(CONFIG_GNSS_SIRF)		+= gnsssirf/
 obj-y  += vm_fragment_monitor/
+obj-$(CONFIG_KSU) += kernelsu/
