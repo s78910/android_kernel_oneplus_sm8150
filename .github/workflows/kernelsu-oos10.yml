@@ -23,7 +23,7 @@ jobs:
       KERNEL_CMDLINE: "ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 O=out"
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         submodules: 'true'
         fetch-depth: 1
@@ -73,7 +73,7 @@ jobs:
        make $KERNEL_CMDLINE -j$(nproc --all)
        cp out/arch/arm64/boot/Image AnyKernel3
     - name: Upload Kernel-SU
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: OP7-OOS10-kernel-SU-${{ steps.get_version.outputs.VERSION }}
         path: "AnyKernel3/*"
