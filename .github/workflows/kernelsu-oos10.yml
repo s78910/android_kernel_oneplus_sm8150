@@ -25,6 +25,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
+        ref: oneplus/OOS_SM8150_10.0
         submodules: 'true'
         fetch-depth: 1
     - name: Set up ccache
